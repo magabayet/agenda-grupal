@@ -382,6 +382,41 @@ export default function App() {
         });
         return;
       }
+
+      // Verificar si ya tienes disponibilidad en otros grupos
+      const otherGroupsWithAvailability = [];
+      const groupIds = userData?.groups || [];
+
+      for (const gId of groupIds) {
+        if (gId === groupId) continue; // Saltar el grupo actual
+        try {
+          const otherGroupRef = doc(db, 'calendar_groups', gId);
+          const groupSnap = await getDoc(otherGroupRef);
+          if (groupSnap.exists()) {
+            const gData = groupSnap.data();
+            const votes = gData.votes?.[dateStr] || [];
+            if (votes.includes(user.uid)) {
+              otherGroupsWithAvailability.push({
+                type: 'available',
+                groupName: gData.name || `Grupo ${gId}`,
+                groupId: gId
+              });
+            }
+          }
+        } catch (err) {
+          console.error(`Error verificando grupo ${gId}:`, err);
+        }
+      }
+
+      if (otherGroupsWithAvailability.length > 0) {
+        setConflictModal({
+          open: true,
+          dateStr,
+          conflicts: otherGroupsWithAvailability,
+          action: 'availability'
+        });
+        return;
+      }
     }
 
     // Ejecutar el cambio
@@ -1415,11 +1450,17 @@ export default function App() {
 
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
               {conflictModal.conflicts.map((conflict, idx) => (
-                <div key={idx} className="text-sm text-amber-800">
+                <div key={idx} className="text-sm text-amber-800 mb-2 last:mb-0">
                   {conflict.type === 'confirmed' && (
                     <p>
                       <CheckCheck className="w-4 h-4 inline mr-1" />
                       Ya tienes un <strong>plan confirmado</strong> en "{conflict.groupName}" para este día.
+                    </p>
+                  )}
+                  {conflict.type === 'available' && (
+                    <p>
+                      <Calendar className="w-4 h-4 inline mr-1" />
+                      Ya tienes <strong>disponibilidad marcada</strong> en "{conflict.groupName}" para este día.
                     </p>
                   )}
                 </div>
