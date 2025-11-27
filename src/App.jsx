@@ -1681,8 +1681,12 @@ export default function App() {
                 <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
                   {/* Planes confirmados */}
                   {Object.entries(userData?.confirmedPlans || {}).map(([dateStr, plan]) => {
-                    const date = new Date(dateStr);
-                    if (date < new Date().setHours(0, 0, 0, 0)) return null;
+                    // Parsear fecha correctamente para evitar problemas de timezone
+                    const [year, month, day] = dateStr.split('-').map(Number);
+                    const date = new Date(year, month - 1, day);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    if (date < today) return null;
                     return (
                       <div key={dateStr} className="flex items-center justify-between bg-green-50 rounded-lg px-3 py-2">
                         <div className="flex items-center gap-2">
@@ -1709,8 +1713,12 @@ export default function App() {
 
                   {/* Días bloqueados */}
                   {Object.entries(userData?.blockedDays || {}).map(([dateStr, blockInfo]) => {
-                    const date = new Date(dateStr);
-                    if (date < new Date().setHours(0, 0, 0, 0)) return null;
+                    // Parsear fecha correctamente para evitar problemas de timezone
+                    const [year, month, day] = dateStr.split('-').map(Number);
+                    const date = new Date(year, month - 1, day);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    if (date < today) return null;
                     return (
                       <div key={dateStr} className="flex items-center justify-between bg-red-50 rounded-lg px-3 py-2">
                         <div className="flex items-center gap-2">
