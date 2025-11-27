@@ -879,7 +879,7 @@ export default function App() {
                 <h3 className="text-sm font-semibold text-slate-500 mb-3 flex items-center gap-2">
                   <Users className="w-4 h-4" /> Tus grupos
                 </h3>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {userGroups.map((group) => (
                     <button
                       key={group.id}
@@ -887,35 +887,53 @@ export default function App() {
                         setGroupId(group.id);
                         setView('calendar');
                       }}
-                      className="w-full p-4 bg-white rounded-xl border border-slate-100 shadow-sm hover:shadow-md hover:border-indigo-200 transition flex items-center justify-between group"
+                      className="w-full p-4 bg-white rounded-xl border border-slate-100 shadow-sm hover:shadow-md hover:border-indigo-200 transition text-left group"
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="bg-indigo-100 text-indigo-600 font-mono font-bold px-3 py-2 rounded-lg text-sm">
-                          {group.id}
-                        </div>
-                        <div className="text-left">
-                          {group.name && <p className="font-medium text-slate-700">{group.name}</p>}
-                          <p className={`text-slate-500 ${group.name ? 'text-xs' : 'font-medium text-slate-700'}`}>{group.memberCount} miembro{group.memberCount !== 1 ? 's' : ''}</p>
-                          <div className="flex -space-x-2 mt-1">
-                            {group.members.slice(0, 4).map((m, idx) => (
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          {/* Nombre del grupo o código como título */}
+                          <h4 className="font-semibold text-slate-800 text-lg truncate">
+                            {group.name || `Grupo ${group.id}`}
+                          </h4>
+
+                          {/* Descripción si existe */}
+                          {group.description && (
+                            <p className="text-sm text-slate-500 mt-0.5 line-clamp-2">{group.description}</p>
+                          )}
+
+                          {/* Código y miembros */}
+                          <div className="flex items-center gap-3 mt-2">
+                            <span className="bg-indigo-100 text-indigo-600 font-mono font-bold px-2 py-1 rounded text-xs">
+                              {group.id}
+                            </span>
+                            <span className="text-xs text-slate-400">
+                              {group.memberCount} miembro{group.memberCount !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+
+                          {/* Avatares de miembros */}
+                          <div className="flex -space-x-2 mt-2">
+                            {group.members.slice(0, 5).map((m, idx) => (
                               m.photoURL ? (
-                                <img key={idx} src={m.photoURL} alt={m.name} className="w-5 h-5 rounded-full border-2 border-white" />
+                                <img key={idx} src={m.photoURL} alt={m.name} className="w-6 h-6 rounded-full border-2 border-white" />
                               ) : (
-                                <div key={idx} className="w-5 h-5 rounded-full bg-indigo-400 border-2 border-white flex items-center justify-center text-white text-[10px]">
+                                <div key={idx} className="w-6 h-6 rounded-full bg-indigo-400 border-2 border-white flex items-center justify-center text-white text-[10px] font-medium">
                                   {m.name?.charAt(0)}
                                 </div>
                               )
                             ))}
-                            {group.members.length > 4 && (
-                              <div className="w-5 h-5 rounded-full bg-slate-200 border-2 border-white flex items-center justify-center text-slate-500 text-[10px]">
-                                +{group.members.length - 4}
+                            {group.members.length > 5 && (
+                              <div className="w-6 h-6 rounded-full bg-slate-200 border-2 border-white flex items-center justify-center text-slate-500 text-[10px] font-medium">
+                                +{group.members.length - 5}
                               </div>
                             )}
                           </div>
                         </div>
-                      </div>
-                      <div className="text-indigo-600 opacity-0 group-hover:opacity-100 transition">
-                        <Calendar className="w-5 h-5" />
+
+                        {/* Icono de acceso */}
+                        <div className="text-indigo-600 opacity-0 group-hover:opacity-100 transition mt-1">
+                          <Calendar className="w-5 h-5" />
+                        </div>
                       </div>
                     </button>
                   ))}
