@@ -381,18 +381,19 @@ export default function App() {
   };
 
   const saveMessage = async () => {
-    if (!user || !groupId || !groupData) return;
+    if (!user || !groupId || !groupData || !messageModal.message.trim()) return;
 
     const groupRef = doc(db, 'calendar_groups', groupId);
 
     try {
       await updateDoc(groupRef, {
-        [`messages.${messageModal.dateStr}.${user.uid}`]: messageModal.message
+        [`messages.${messageModal.dateStr}.${user.uid}`]: messageModal.message.trim()
       });
-      setMessageModal({ open: false, dateStr: '', message: '' });
-      showNotification('Mensaje guardado');
+      // Solo limpiar el campo de mensaje, mantener el modal abierto para chat continuo
+      setMessageModal(prev => ({ ...prev, message: '' }));
     } catch (e) {
       console.error("Error al guardar mensaje", e);
+      showNotification('Error al enviar mensaje');
     }
   };
 
@@ -685,70 +686,128 @@ export default function App() {
         </div>
       )}
 
-      {/* Message Modal */}
+      {/* Message Modal - iMessage Style Chat */}
       {messageModal.open && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm max-h-[80vh] flex flex-col">
-            <div className="flex justify-between items-center mb-4">
-              <div>
-                <h3 className="font-bold text-lg">Notas del día</h3>
-                <p className="text-sm text-slate-500">{messageModal.dateStr}</p>
-              </div>
-              <button onClick={() => setMessageModal({ open: false, dateStr: '', message: '' })} className="p-1 hover:bg-slate-100 rounded-full">
-                <X className="w-5 h-5" />
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
+          <div className="bg-slate-100 w-full sm:max-w-md sm:rounded-2xl sm:m-4 flex flex-col max-h-[85vh] sm:max-h-[600px]">
+            {/* Header - iOS style */}
+            <div className="bg-slate-200/80 backdrop-blur-lg px-4 py-3 flex items-center justify-between border-b border-slate-300 sm:rounded-t-2xl">
+              <button
+                onClick={() => setMessageModal({ open: false, dateStr: '', message: '' })}
+                className="text-indigo-600 font-medium text-sm"
+              >
+                Cerrar
               </button>
+              <div className="text-center">
+                <h3 className="font-semibold text-slate-800">Chat del día</h3>
+                <p className="text-xs text-slate-500">
+                  {new Date(messageModal.dateStr).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' })}
+                </p>
+              </div>
+              <div className="w-12"></div>
             </div>
 
-            {/* Mensajes de otros usuarios */}
-            {(() => {
-              const dateMessages = groupData?.messages?.[messageModal.dateStr] || {};
-              const otherMessages = Object.entries(dateMessages).filter(([uid]) => uid !== user?.uid);
+            {/* Messages Area - Chat bubbles */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-100">
+              {(() => {
+                const dateMessages = groupData?.messages?.[messageModal.dateStr] || {};
+                const allMessages = Object.entries(dateMessages);
 
-              if (otherMessages.length > 0) {
-                return (
-                  <div className="mb-4 space-y-2 max-h-40 overflow-y-auto">
-                    <p className="text-xs font-semibold text-slate-400 uppercase">Mensajes del grupo</p>
-                    {otherMessages.map(([uid, msg]) => {
-                      const member = groupData?.members?.find(m => m.uid === uid);
-                      return (
-                        <div key={uid} className="bg-slate-50 rounded-xl p-3">
-                          <div className="flex items-center gap-2 mb-1">
+                if (allMessages.length === 0) {
+                  return (
+                    <div className="flex flex-col items-center justify-center h-full text-slate-400 py-8">
+                      <MessageCircle className="w-12 h-12 mb-2 opacity-50" />
+                      <p className="text-sm">No hay mensajes aún</p>
+                      <p className="text-xs">Sé el primero en comentar</p>
+                    </div>
+                  );
+                }
+
+                return allMessages.map(([uid, msg]) => {
+                  const isMe = uid === user?.uid;
+                  const member = groupData?.members?.find(m => m.uid === uid);
+
+                  return (
+                    <div key={uid} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`flex items-end gap-2 max-w-[80%] ${isMe ? 'flex-row-reverse' : ''}`}>
+                        {/* Avatar */}
+                        {!isMe && (
+                          <div className="flex-shrink-0 mb-1">
                             {member?.photoURL ? (
-                              <img src={member.photoURL} alt={member.name} className="w-5 h-5 rounded-full" />
+                              <img src={member.photoURL} alt={member.name} className="w-7 h-7 rounded-full" />
                             ) : (
-                              <div className="w-5 h-5 rounded-full bg-indigo-400 flex items-center justify-center text-white text-[10px]">
+                              <div className="w-7 h-7 rounded-full bg-slate-400 flex items-center justify-center text-white text-xs font-medium">
                                 {member?.name?.charAt(0) || '?'}
                               </div>
                             )}
-                            <span className="text-xs font-medium text-slate-600">{member?.name?.split(' ')[0] || 'Usuario'}</span>
                           </div>
-                          <p className="text-sm text-slate-700">{msg}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              }
-              return null;
-            })()}
+                        )}
 
-            {/* Mi mensaje */}
-            <div className="flex-1">
-              <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Tu nota</p>
-              <textarea
-                className="w-full p-3 border border-slate-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                rows={3}
-                placeholder="Ej: Puedo pero llegaría tarde..."
-                value={messageModal.message}
-                onChange={(e) => setMessageModal({ ...messageModal, message: e.target.value })}
-              />
+                        {/* Message bubble */}
+                        <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                          {!isMe && (
+                            <span className="text-[10px] text-slate-500 ml-1 mb-0.5">
+                              {member?.name?.split(' ')[0] || 'Usuario'}
+                            </span>
+                          )}
+                          <div
+                            className={`
+                              px-4 py-2 rounded-2xl text-sm leading-relaxed
+                              ${isMe
+                                ? 'bg-indigo-600 text-white rounded-br-md'
+                                : 'bg-white text-slate-800 rounded-bl-md shadow-sm'
+                              }
+                            `}
+                          >
+                            {msg}
+                          </div>
+                          {isMe && (
+                            <span className="text-[10px] text-slate-400 mr-1 mt-0.5">Tú</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
             </div>
-            <button
-              onClick={saveMessage}
-              className="w-full mt-4 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition"
-            >
-              Guardar
-            </button>
+
+            {/* Input Area - iOS style */}
+            <div className="bg-slate-200/80 backdrop-blur-lg px-3 py-2 border-t border-slate-300 sm:rounded-b-2xl">
+              <div className="flex items-end gap-2">
+                <div className="flex-1 bg-white rounded-full border border-slate-300 flex items-center">
+                  <input
+                    type="text"
+                    className="flex-1 px-4 py-2 bg-transparent outline-none text-sm"
+                    placeholder="Mensaje..."
+                    value={messageModal.message}
+                    onChange={(e) => setMessageModal({ ...messageModal, message: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        saveMessage();
+                      }
+                    }}
+                  />
+                </div>
+                <button
+                  onClick={saveMessage}
+                  disabled={!messageModal.message.trim()}
+                  className={`
+                    w-9 h-9 rounded-full flex items-center justify-center transition
+                    ${messageModal.message.trim()
+                      ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                      : 'bg-slate-300 text-slate-400 cursor-not-allowed'
+                    }
+                  `}
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400 text-center mt-1">
+                Presiona Enter para enviar
+              </p>
+            </div>
           </div>
         </div>
       )}
