@@ -41,11 +41,14 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   CheckCheck,
   Ban,
   Lock,
   AlertTriangle,
-  Bell
+  Bell,
+  UserCheck
 } from 'lucide-react';
 
 // --- Configuración de Firebase ---
@@ -87,6 +90,7 @@ export default function App() {
   const [blockDayModal, setBlockDayModal] = useState({ open: false, dateStr: '', reason: '' });
   const [conflictModal, setConflictModal] = useState({ open: false, dateStr: '', conflicts: [], action: null });
   const [confirmPlanModal, setConfirmPlanModal] = useState({ open: false, dateStr: '' });
+  const [expandedConfirmed, setExpandedConfirmed] = useState(null); // dateStr del día que tiene el desplegable de confirmados abierto
   const monthRefs = useRef({});
 
   // 1. Escuchar estado de autenticación
@@ -525,13 +529,14 @@ export default function App() {
         }
       });
 
-      // Marcar en el grupo que hay un plan confirmado
+      // Marcar en el grupo que hay un plan confirmado (múltiples usuarios pueden confirmar)
       await updateDoc(groupRef, {
-        [`confirmedDay`]: {
-          dateStr,
-          confirmedBy: user.uid,
+        [`confirmedDays.${dateStr}`]: arrayUnion({
+          uid: user.uid,
+          name: user.displayName || 'Usuario',
+          photoURL: user.photoURL || null,
           confirmedAt: new Date().toISOString()
-        }
+        })
       });
 
       // Remover disponibilidad de otros grupos para ese día
@@ -564,7 +569,7 @@ export default function App() {
   };
 
   const cancelConfirmedPlan = async (dateStr) => {
-    if (!user || !groupId) return;
+    if (!user || !groupId || !groupData) return;
 
     const userRef = doc(db, 'users', user.uid);
     const groupRef = doc(db, 'calendar_groups', groupId);
@@ -574,10 +579,18 @@ export default function App() {
         [`confirmedPlans.${dateStr}`]: deleteField()
       });
 
-      // Si el confirmedDay del grupo es este, eliminarlo
-      if (groupData?.confirmedDay?.dateStr === dateStr) {
+      // Remover al usuario de la lista de confirmaciones del día
+      const currentConfirmed = groupData.confirmedDays?.[dateStr] || [];
+      const updatedConfirmed = currentConfirmed.filter(c => c.uid !== user.uid);
+
+      if (updatedConfirmed.length === 0) {
+        // Si no queda nadie, eliminar el campo completo
         await updateDoc(groupRef, {
-          confirmedDay: deleteField()
+          [`confirmedDays.${dateStr}`]: deleteField()
+        });
+      } else {
+        await updateDoc(groupRef, {
+          [`confirmedDays.${dateStr}`]: updatedConfirmed
         });
       }
 
@@ -821,7 +834,7 @@ export default function App() {
 
   // --- Cálculo de Estado (Semáforo) ---
   const getDayStatus = (dateStr) => {
-    if (!groupData) return { colorClass: 'bg-slate-100 border-slate-200 text-slate-500', statusIcon: <XCircle className="w-4 h-4" />, isUserAvailable: false, voteCount: 0, totalMembers: 1, percentage: 0, isStarred: false, starCount: 0, isBlocked: false, isConfirmed: false, confirmedInOtherGroup: null, unreadCount: 0 };
+    if (!groupData) return { colorClass: 'bg-slate-100 border-slate-200 text-slate-500', statusIcon: <XCircle className="w-4 h-4" />, isUserAvailable: false, voteCount: 0, totalMembers: 1, percentage: 0, isStarred: false, starCount: 0, isBlocked: false, isConfirmed: false, confirmedInOtherGroup: null, unreadCount: 0, confirmedUsers: [], confirmedCount: 0 };
 
     const totalMembers = groupData.members?.length || 1;
     const votes = groupData.votes?.[dateStr] || [];
@@ -855,6 +868,10 @@ export default function App() {
     const isConfirmed = confirmedPlan?.groupId === groupId;
     const confirmedInOtherGroup = confirmedPlan && confirmedPlan.groupId !== groupId ? confirmedPlan : null;
 
+    // Lista de usuarios que confirmaron en este grupo para este día
+    const confirmedUsers = groupData.confirmedDays?.[dateStr] || [];
+    const confirmedCount = confirmedUsers.length;
+
     // Mensajes sin leer
     const seenCount = userData?.lastSeenMessages?.[groupId]?.[dateStr] || 0;
     const unreadCount = Math.max(0, messageCount - seenCount);
@@ -878,7 +895,7 @@ export default function App() {
       statusType = 'yellow';
     }
 
-    return { colorClass, statusIcon, isUserAvailable, voteCount, totalMembers, percentage, isStarred, starCount, hasMyMessage, messageCount, statusType, isBlocked, blockReason, isConfirmed, confirmedInOtherGroup, unreadCount };
+    return { colorClass, statusIcon, isUserAvailable, voteCount, totalMembers, percentage, isStarred, starCount, hasMyMessage, messageCount, statusType, isBlocked, blockReason, isConfirmed, confirmedInOtherGroup, unreadCount, confirmedUsers, confirmedCount };
   };
 
   // Filtrar días según el filtro seleccionado
@@ -1824,8 +1841,9 @@ export default function App() {
               <div className="grid grid-cols-1 gap-3">
                 {filteredDays.map((day, idx) => {
                   const status = getDayStatus(day.dateStr);
-                  const { colorClass, statusIcon, isUserAvailable, voteCount, totalMembers, isStarred, starCount, hasMyMessage, messageCount, isBlocked, blockReason, isConfirmed, statusType, unreadCount } = status;
+                  const { colorClass, statusIcon, isUserAvailable, voteCount, totalMembers, isStarred, starCount, hasMyMessage, messageCount, isBlocked, blockReason, isConfirmed, statusType, unreadCount, confirmedUsers, confirmedCount } = status;
                   const isNewMonth = idx === 0 || filteredDays[idx - 1]?.monthKey !== day.monthKey;
+                  const isConfirmedExpanded = expandedConfirmed === day.dateStr;
 
                   return (
                     <div key={day.dateStr}>
@@ -1927,14 +1945,15 @@ export default function App() {
                               </button>
                             )}
 
-                            {/* Confirm plan button - only show on green days */}
+                            {/* Confirm plan button - PROMINENT, only show on green days */}
                             {!isBlocked && statusType === 'green' && !isConfirmed && (
                               <button
                                 onClick={(e) => openConfirmPlanModal(day.dateStr, e)}
-                                className="p-2 rounded-full bg-green-100 text-green-600 hover:bg-green-200 transition"
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-green-500 text-white hover:bg-green-600 transition shadow-sm hover:shadow-md font-medium text-xs"
                                 title="Confirmar plan"
                               >
                                 <CheckCheck className="w-4 h-4" />
+                                <span>Confirmar</span>
                               </button>
                             )}
 
@@ -1943,9 +1962,22 @@ export default function App() {
                               <button
                                 onClick={(e) => { e.stopPropagation(); cancelConfirmedPlan(day.dateStr); }}
                                 className="p-2 rounded-full bg-green-200 text-green-700 hover:bg-green-300 transition"
-                                title="Cancelar plan"
+                                title="Cancelar mi confirmación"
                               >
                                 <X className="w-4 h-4" />
+                              </button>
+                            )}
+
+                            {/* Confirmed users indicator */}
+                            {confirmedCount > 0 && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setExpandedConfirmed(isConfirmedExpanded ? null : day.dateStr); }}
+                                className="flex items-center gap-1 px-2 py-1.5 rounded-full bg-green-100 text-green-700 hover:bg-green-200 transition text-xs font-medium"
+                                title="Ver quiénes confirmaron"
+                              >
+                                <UserCheck className="w-3.5 h-3.5" />
+                                <span>{confirmedCount}</span>
+                                {isConfirmedExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                               </button>
                             )}
 
@@ -1977,6 +2009,33 @@ export default function App() {
                             </div>
                           </div>
                         </div>
+
+                        {/* Expandable confirmed users panel */}
+                        {isConfirmedExpanded && confirmedCount > 0 && (
+                          <div className="mt-3 pt-3 border-t border-green-200">
+                            <div className="flex items-center gap-2 mb-2 text-xs text-green-700 font-semibold">
+                              <UserCheck className="w-4 h-4" />
+                              <span>Confirmaron asistencia ({confirmedCount})</span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {confirmedUsers.map((cu, i) => (
+                                <div key={i} className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-full px-3 py-1.5">
+                                  {cu.photoURL ? (
+                                    <img src={cu.photoURL} alt={cu.name} className="w-5 h-5 rounded-full" />
+                                  ) : (
+                                    <div className="w-5 h-5 rounded-full bg-green-300 flex items-center justify-center text-[10px] font-bold text-green-800">
+                                      {cu.name?.charAt(0)?.toUpperCase() || '?'}
+                                    </div>
+                                  )}
+                                  <span className="text-xs font-medium text-green-800">{cu.name}</span>
+                                  {cu.uid === user?.uid && (
+                                    <span className="text-[10px] text-green-600">(tú)</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
