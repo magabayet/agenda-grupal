@@ -48,7 +48,9 @@ import {
   Lock,
   AlertTriangle,
   Bell,
-  UserCheck
+  UserCheck,
+  Home,
+  CalendarX
 } from 'lucide-react';
 
 // --- Configuración de Firebase ---
@@ -992,18 +994,30 @@ export default function App() {
       {/* Header */}
       <div className="bg-white shadow-sm sticky top-0 z-20">
         <div className="max-w-md mx-auto px-4 py-3 flex justify-between items-center">
-          <div className="flex items-center gap-2">
+          {/* Logo - clickeable para ir a página principal */}
+          <button
+            onClick={() => { setGroupId(''); setGroupData(null); setView('join'); }}
+            className="flex items-center gap-2 hover:opacity-80 transition"
+          >
             <Calendar className="w-6 h-6 text-indigo-600" />
             <div>
               <span className="text-indigo-600 font-bold text-lg leading-none block">AgendaGrupal</span>
               <span className="text-[10px] text-slate-400 uppercase tracking-widest">reconect</span>
             </div>
-          </div>
+          </button>
 
           {user && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {view === 'calendar' && (
                 <>
+                  {/* Botón Home - volver a página principal */}
+                  <button
+                    onClick={() => { setGroupId(''); setGroupData(null); setView('join'); }}
+                    className="p-2 bg-slate-100 text-slate-600 rounded-full hover:bg-slate-200 transition"
+                    title="Ir al inicio"
+                  >
+                    <Home className="w-5 h-5" />
+                  </button>
                   <button onClick={openInviteModal} className="p-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 transition" title="Invitar por email">
                     <Mail className="w-5 h-5" />
                   </button>
@@ -1015,19 +1029,32 @@ export default function App() {
                   </button>
                 </>
               )}
+              {/* Foto de perfil - clickeable para ir al inicio */}
               {user.photoURL ? (
                 <img
                   src={user.photoURL}
                   alt={user.displayName}
-                  className="w-8 h-8 rounded-full border-2 border-indigo-200 cursor-pointer"
-                  onClick={handleLogout}
-                  title="Cerrar sesión"
+                  className="w-8 h-8 rounded-full border-2 border-indigo-200 cursor-pointer hover:border-indigo-400 transition"
+                  onClick={() => { setGroupId(''); setGroupData(null); setView('join'); }}
+                  title="Ir al inicio"
                 />
               ) : (
-                <button onClick={handleLogout} className="p-2 bg-red-50 text-red-600 rounded-full hover:bg-red-100 transition" title="Cerrar sesión">
-                  <LogOut className="w-5 h-5" />
+                <button
+                  onClick={() => { setGroupId(''); setGroupData(null); setView('join'); }}
+                  className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-sm hover:bg-indigo-200 transition"
+                  title="Ir al inicio"
+                >
+                  {user.displayName?.charAt(0) || '?'}
                 </button>
               )}
+              {/* Botón cerrar sesión */}
+              <button
+                onClick={handleLogout}
+                className="p-2 bg-red-50 text-red-600 rounded-full hover:bg-red-100 transition"
+                title="Cerrar sesión"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
           )}
         </div>
@@ -1537,9 +1564,184 @@ export default function App() {
         {/* VIEW: JOIN/CREATE */}
         {view === 'join' && (
           <div className="space-y-4">
-            <div className="text-center mb-6">
+            <div className="text-center mb-4">
               <h2 className="text-2xl font-bold text-slate-800">¡Hola, {user?.displayName?.split(' ')[0]}!</h2>
-              <p className="text-slate-500">Crea un grupo o únete a uno existente</p>
+              <p className="text-slate-500">Tu panel de disponibilidad personal</p>
+            </div>
+
+            {/* ========== CALENDARIO MAESTRO ========== */}
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-slate-700 flex items-center gap-2">
+                  <CalendarX className="w-5 h-5 text-indigo-600" />
+                  Mi disponibilidad
+                </h3>
+                <span className="text-xs text-slate-400">Próximos 30 días</span>
+              </div>
+
+              <p className="text-xs text-slate-500 mb-3">
+                Bloquea días o confirma planes. Se reflejarán en todos tus grupos.
+              </p>
+
+              {/* Mini calendario de 30 días */}
+              <div className="grid grid-cols-7 gap-1 mb-3">
+                {/* Headers de días */}
+                {['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((d, i) => (
+                  <div key={i} className="text-center text-[10px] font-bold text-slate-400 py-1">{d}</div>
+                ))}
+
+                {/* Días del calendario */}
+                {(() => {
+                  const days = [];
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+
+                  // Encontrar el lunes de esta semana
+                  const startOfWeek = new Date(today);
+                  const dayOfWeek = today.getDay();
+                  const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+                  startOfWeek.setDate(today.getDate() + diff);
+
+                  // Generar 35 días (5 semanas)
+                  for (let i = 0; i < 35; i++) {
+                    const date = new Date(startOfWeek);
+                    date.setDate(startOfWeek.getDate() + i);
+                    const dateStr = date.toISOString().split('T')[0];
+
+                    const isBlocked = userData?.blockedDays?.[dateStr];
+                    const confirmedPlan = userData?.confirmedPlans?.[dateStr];
+                    const isPast = date < today;
+                    const isToday = date.getTime() === today.getTime();
+
+                    let bgColor = 'bg-slate-50 hover:bg-slate-100';
+                    let textColor = 'text-slate-600';
+                    let icon = null;
+
+                    if (isPast) {
+                      bgColor = 'bg-slate-100';
+                      textColor = 'text-slate-300';
+                    } else if (isBlocked) {
+                      bgColor = 'bg-red-100';
+                      textColor = 'text-red-600';
+                      icon = <Ban className="w-2.5 h-2.5" />;
+                    } else if (confirmedPlan) {
+                      bgColor = 'bg-green-100';
+                      textColor = 'text-green-600';
+                      icon = <CheckCheck className="w-2.5 h-2.5" />;
+                    }
+
+                    if (isToday) {
+                      bgColor = isBlocked ? 'bg-red-200' : confirmedPlan ? 'bg-green-200' : 'bg-indigo-100';
+                    }
+
+                    days.push(
+                      <button
+                        key={dateStr}
+                        onClick={() => !isPast && openBlockDayModal(dateStr)}
+                        disabled={isPast}
+                        className={`
+                          relative aspect-square rounded-lg flex flex-col items-center justify-center text-xs font-medium transition
+                          ${bgColor} ${textColor}
+                          ${isPast ? 'cursor-not-allowed' : 'cursor-pointer'}
+                          ${isToday ? 'ring-2 ring-indigo-400' : ''}
+                        `}
+                        title={
+                          isBlocked ? `Bloqueado: ${userData?.blockedDays?.[dateStr]?.reason || 'Sin razón'}` :
+                          confirmedPlan ? `Plan: ${confirmedPlan.groupName}` :
+                          'Clic para bloquear'
+                        }
+                      >
+                        <span className="text-[11px] font-bold">{date.getDate()}</span>
+                        {icon && <span className="absolute bottom-0.5">{icon}</span>}
+                      </button>
+                    );
+                  }
+                  return days;
+                })()}
+              </div>
+
+              {/* Leyenda */}
+              <div className="flex flex-wrap gap-3 text-[10px] text-slate-500 border-t border-slate-100 pt-3">
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded bg-red-100 border border-red-200"></div>
+                  <span>Bloqueado</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded bg-green-100 border border-green-200"></div>
+                  <span>Plan confirmado</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded bg-slate-50 border border-slate-200"></div>
+                  <span>Disponible</span>
+                </div>
+              </div>
+
+              {/* Resumen de días bloqueados y confirmados */}
+              {(Object.keys(userData?.blockedDays || {}).length > 0 || Object.keys(userData?.confirmedPlans || {}).length > 0) && (
+                <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+                  {/* Planes confirmados */}
+                  {Object.entries(userData?.confirmedPlans || {}).map(([dateStr, plan]) => {
+                    const date = new Date(dateStr);
+                    if (date < new Date().setHours(0, 0, 0, 0)) return null;
+                    return (
+                      <div key={dateStr} className="flex items-center justify-between bg-green-50 rounded-lg px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <CheckCheck className="w-4 h-4 text-green-600" />
+                          <div>
+                            <span className="text-xs font-medium text-green-800">
+                              {date.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
+                            </span>
+                            <span className="text-[10px] text-green-600 block">{plan.groupName}</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setGroupId(plan.groupId);
+                            setView('calendar');
+                          }}
+                          className="text-[10px] text-green-600 hover:text-green-800 font-medium"
+                        >
+                          Ver grupo →
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                  {/* Días bloqueados */}
+                  {Object.entries(userData?.blockedDays || {}).map(([dateStr, blockInfo]) => {
+                    const date = new Date(dateStr);
+                    if (date < new Date().setHours(0, 0, 0, 0)) return null;
+                    return (
+                      <div key={dateStr} className="flex items-center justify-between bg-red-50 rounded-lg px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <Ban className="w-4 h-4 text-red-500" />
+                          <div>
+                            <span className="text-xs font-medium text-red-800">
+                              {date.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
+                            </span>
+                            {blockInfo.reason && (
+                              <span className="text-[10px] text-red-600 block">{blockInfo.reason}</span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => unblockDay(dateStr)}
+                          className="text-[10px] text-red-500 hover:text-red-700 font-medium"
+                        >
+                          Desbloquear
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Separador */}
+            <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-slate-200"></div>
+              <span className="flex-shrink mx-4 text-slate-400 text-sm">Mis grupos</span>
+              <div className="flex-grow border-t border-slate-200"></div>
             </div>
 
             {/* Grupos anteriores */}
