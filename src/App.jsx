@@ -1879,58 +1879,67 @@ export default function App() {
                           <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-600"></div>
                         )}
 
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-4">
+                        {/* Header row: fecha y estado */}
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
                             <div className={`
-                              flex flex-col items-center justify-center w-12 h-12 rounded-lg relative
+                              flex flex-col items-center justify-center w-11 h-11 rounded-lg relative flex-shrink-0
                               ${isBlocked ? 'bg-slate-300 text-slate-600' :
                                 isConfirmed ? 'bg-green-500 text-white' :
                                 isUserAvailable ? 'bg-indigo-600 text-white' :
                                 'bg-slate-100 text-slate-500'}
                             `}>
-                              {isBlocked && <Lock className="w-4 h-4 absolute -top-1 -right-1 text-slate-600" />}
-                              {isConfirmed && <CheckCheck className="w-4 h-4 absolute -top-1 -right-1 text-green-600" />}
-                              <span className="text-[10px] uppercase font-bold">{day.monthName.substring(0, 3)}</span>
-                              <span className="text-lg font-bold leading-none">{day.dayNum}</span>
+                              {isBlocked && <Lock className="w-3 h-3 absolute -top-1 -right-1 text-slate-600" />}
+                              {isConfirmed && <CheckCheck className="w-3 h-3 absolute -top-1 -right-1 text-green-600" />}
+                              <span className="text-[9px] uppercase font-bold">{day.monthName.substring(0, 3)}</span>
+                              <span className="text-base font-bold leading-none">{day.dayNum}</span>
                             </div>
-                            <div>
-                              <p className="font-semibold text-slate-700 capitalize">{day.dayName}</p>
-                              <div className="flex items-center gap-2 flex-wrap">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold text-slate-700 capitalize text-sm">{day.dayName}</p>
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 {isBlocked && (
-                                  <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                                    <Lock className="w-3 h-3" /> Bloqueado {blockReason && `- ${blockReason}`}
+                                  <span className="text-[10px] text-slate-500 font-medium flex items-center gap-0.5">
+                                    <Lock className="w-2.5 h-2.5" /> Bloqueado
                                   </span>
                                 )}
                                 {isConfirmed && (
-                                  <span className="text-xs text-green-600 font-medium flex items-center gap-1">
-                                    <CheckCheck className="w-3 h-3" /> Plan confirmado
+                                  <span className="text-[10px] text-green-600 font-medium flex items-center gap-0.5">
+                                    <CheckCheck className="w-2.5 h-2.5" /> Confirmado
                                   </span>
                                 )}
                                 {!isBlocked && !isConfirmed && isUserAvailable && (
-                                  <span className="text-xs text-indigo-600 font-medium flex items-center gap-1">
-                                    <Check className="w-3 h-3" /> Disponible
+                                  <span className="text-[10px] text-indigo-600 font-medium flex items-center gap-0.5">
+                                    <Check className="w-2.5 h-2.5" /> Disponible
                                   </span>
                                 )}
                                 {starCount > 0 && (
-                                  <span className="text-xs text-yellow-600 flex items-center gap-0.5">
-                                    <Star className="w-3 h-3 fill-yellow-400" /> {starCount}
+                                  <span className="text-[10px] text-yellow-600 flex items-center gap-0.5">
+                                    <Star className="w-2.5 h-2.5 fill-yellow-400" /> {starCount}
                                   </span>
                                 )}
                                 {messageCount > 0 && (
-                                  <span className="text-xs text-slate-400 flex items-center gap-0.5">
-                                    <MessageCircle className="w-3 h-3" /> {messageCount}
+                                  <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
+                                    <MessageCircle className="w-2.5 h-2.5" /> {messageCount}
                                   </span>
                                 )}
                               </div>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1">
+                          {/* Status badge */}
+                          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-bold flex-shrink-0 ${colorClass}`}>
+                            {statusIcon}
+                            <span>{voteCount}/{totalMembers}</span>
+                          </div>
+                        </div>
+
+                        {/* Action buttons row */}
+                        <div className="flex items-center gap-1 flex-wrap">
                             {/* Block/Unblock button */}
                             {isBlocked ? (
                               <button
                                 onClick={(e) => { e.stopPropagation(); unblockDay(day.dateStr); }}
-                                className="p-2 rounded-full bg-slate-200 text-slate-500 hover:bg-slate-300 transition"
+                                className="p-1.5 rounded-full bg-slate-200 text-slate-500 hover:bg-slate-300 transition"
                                 title="Desbloquear día"
                               >
                                 <Lock className="w-4 h-4" />
@@ -1938,7 +1947,7 @@ export default function App() {
                             ) : (
                               <button
                                 onClick={(e) => openBlockDayModal(day.dateStr, e)}
-                                className="p-2 rounded-full bg-slate-100 text-slate-400 hover:bg-slate-200 transition"
+                                className="p-1.5 rounded-full bg-slate-100 text-slate-400 hover:bg-slate-200 transition"
                                 title="Bloquear día"
                               >
                                 <Ban className="w-4 h-4" />
@@ -1949,10 +1958,10 @@ export default function App() {
                             {!isBlocked && statusType === 'green' && !isConfirmed && (
                               <button
                                 onClick={(e) => openConfirmPlanModal(day.dateStr, e)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-green-500 text-white hover:bg-green-600 transition shadow-sm hover:shadow-md font-medium text-xs"
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-green-500 text-white hover:bg-green-600 transition shadow-sm font-medium text-[11px]"
                                 title="Confirmar plan"
                               >
-                                <CheckCheck className="w-4 h-4" />
+                                <CheckCheck className="w-3.5 h-3.5" />
                                 <span>Confirmar</span>
                               </button>
                             )}
@@ -1961,7 +1970,7 @@ export default function App() {
                             {isConfirmed && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); cancelConfirmedPlan(day.dateStr); }}
-                                className="p-2 rounded-full bg-green-200 text-green-700 hover:bg-green-300 transition"
+                                className="p-1.5 rounded-full bg-green-200 text-green-700 hover:bg-green-300 transition"
                                 title="Cancelar mi confirmación"
                               >
                                 <X className="w-4 h-4" />
@@ -1972,18 +1981,18 @@ export default function App() {
                             {confirmedCount > 0 && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); setExpandedConfirmed(isConfirmedExpanded ? null : day.dateStr); }}
-                                className="flex items-center gap-1 px-2 py-1.5 rounded-full bg-green-100 text-green-700 hover:bg-green-200 transition text-xs font-medium"
+                                className="flex items-center gap-0.5 px-2 py-1 rounded-full bg-green-100 text-green-700 hover:bg-green-200 transition text-[11px] font-medium"
                                 title="Ver quiénes confirmaron"
                               >
-                                <UserCheck className="w-3.5 h-3.5" />
+                                <UserCheck className="w-3 h-3" />
                                 <span>{confirmedCount}</span>
-                                {isConfirmedExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                {isConfirmedExpanded ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
                               </button>
                             )}
 
                             <button
                               onClick={(e) => toggleStar(day.dateStr, e)}
-                              className={`p-2 rounded-full transition ${isStarred ? 'bg-yellow-100 text-yellow-600' : 'bg-slate-100 text-slate-400 hover:bg-yellow-50'}`}
+                              className={`p-1.5 rounded-full transition ${isStarred ? 'bg-yellow-100 text-yellow-600' : 'bg-slate-100 text-slate-400 hover:bg-yellow-50'}`}
                               title="Marcar como favorito"
                             >
                               <Star className={`w-4 h-4 ${isStarred ? 'fill-yellow-400' : ''}`} />
@@ -1992,22 +2001,16 @@ export default function App() {
                             {/* Message button with unread badge */}
                             <button
                               onClick={(e) => openMessageModal(day.dateStr, e)}
-                              className={`p-2 rounded-full transition relative ${hasMyMessage ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400 hover:bg-indigo-50'}`}
+                              className={`p-1.5 rounded-full transition relative ${hasMyMessage ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400 hover:bg-indigo-50'}`}
                               title="Ver/Agregar nota"
                             >
                               <MessageCircle className={`w-4 h-4 ${hasMyMessage ? 'fill-indigo-200' : ''}`} />
                               {unreadCount > 0 && (
-                                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold w-3.5 h-3.5 rounded-full flex items-center justify-center">
                                   {unreadCount > 9 ? '9+' : unreadCount}
                                 </span>
                               )}
                             </button>
-
-                            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold ${colorClass}`}>
-                              {statusIcon}
-                              <span>{voteCount}/{totalMembers}</span>
-                            </div>
-                          </div>
                         </div>
 
                         {/* Expandable confirmed users panel */}
