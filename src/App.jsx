@@ -34,7 +34,12 @@ import {
   Mail,
   Send,
   Edit3,
-  Settings
+  Settings,
+  List,
+  Grid,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 // --- Configuración de Firebase ---
@@ -66,6 +71,12 @@ export default function App() {
   const [createGroupModal, setCreateGroupModal] = useState({ open: false, name: '', description: '', emails: '' });
   const [editGroupModal, setEditGroupModal] = useState({ open: false, name: '', description: '' });
   const [inviteModal, setInviteModal] = useState({ open: false, emails: '' });
+  const [calendarViewMode, setCalendarViewMode] = useState('list'); // list, grid, calendar
+  const [selectedCalendarMonth, setSelectedCalendarMonth] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
+  const [expandedDay, setExpandedDay] = useState(null);
   const monthRefs = useRef({});
 
   // 1. Escuchar estado de autenticación
@@ -554,6 +565,59 @@ export default function App() {
       }
     });
   }, [calendarDays, filter, groupData, user]);
+
+  // --- Calendario tradicional ---
+  const getCalendarGridDays = useMemo(() => {
+    const { year, month } = selectedCalendarMonth;
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startDayOfWeek = firstDay.getDay(); // 0 = domingo
+
+    const days = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Días vacíos al inicio
+    for (let i = 0; i < startDayOfWeek; i++) {
+      days.push(null);
+    }
+
+    // Días del mes
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateObj = new Date(year, month, d);
+      const dateStr = dateObj.toISOString().split('T')[0];
+      const isPast = dateObj < today;
+      days.push({
+        dateObj,
+        dateStr,
+        dayNum: d,
+        isPast,
+        dayName: dateObj.toLocaleDateString('es-ES', { weekday: 'long' }),
+        monthName: dateObj.toLocaleDateString('es-ES', { month: 'long' })
+      });
+    }
+
+    return days;
+  }, [selectedCalendarMonth]);
+
+  const navigateMonth = (direction) => {
+    setSelectedCalendarMonth(prev => {
+      let newMonth = prev.month + direction;
+      let newYear = prev.year;
+      if (newMonth > 11) {
+        newMonth = 0;
+        newYear++;
+      } else if (newMonth < 0) {
+        newMonth = 11;
+        newYear--;
+      }
+      return { year: newYear, month: newMonth };
+    });
+    setExpandedDay(null);
+  };
+
+  const currentMonthName = new Date(selectedCalendarMonth.year, selectedCalendarMonth.month).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
 
   // --- Renderizado ---
   if (loading) {
@@ -1070,19 +1134,59 @@ export default function App() {
               </div>
             </div>
 
-            {/* Month Navigation */}
-            <div className="mb-4 overflow-x-auto pb-2 sticky top-16 bg-slate-50 z-10 -mx-4 px-4 py-2">
-              <div className="flex gap-2">
-                {monthsNav.map((month) => (
-                  <button
-                    key={month.key}
-                    onClick={() => scrollToMonth(month.key)}
-                    className="px-3 py-1.5 bg-white border border-slate-200 rounded-full text-sm whitespace-nowrap hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 transition capitalize"
-                  >
-                    {month.name.substring(0, 3)} {month.year !== new Date().getFullYear() && month.year}
-                  </button>
-                ))}
+            {/* View Mode Selector */}
+            <div className="mb-4 flex items-center justify-between sticky top-16 bg-slate-50 z-10 -mx-4 px-4 py-2">
+              <div className="flex gap-1 bg-white rounded-lg p-1 border border-slate-200">
+                <button
+                  onClick={() => setCalendarViewMode('list')}
+                  className={`p-2 rounded-md transition ${calendarViewMode === 'list' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                  title="Vista lista"
+                >
+                  <List className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setCalendarViewMode('grid')}
+                  className={`p-2 rounded-md transition ${calendarViewMode === 'grid' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                  title="Vista grid"
+                >
+                  <Grid className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setCalendarViewMode('calendar')}
+                  className={`p-2 rounded-md transition ${calendarViewMode === 'calendar' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                  title="Vista calendario"
+                >
+                  <CalendarDays className="w-4 h-4" />
+                </button>
               </div>
+
+              {/* Month Navigation for list/grid views */}
+              {calendarViewMode !== 'calendar' && (
+                <div className="flex gap-1 overflow-x-auto">
+                  {monthsNav.slice(0, 6).map((month) => (
+                    <button
+                      key={month.key}
+                      onClick={() => scrollToMonth(month.key)}
+                      className="px-2 py-1 bg-white border border-slate-200 rounded-full text-xs whitespace-nowrap hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 transition capitalize"
+                    >
+                      {month.name.substring(0, 3)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Month Navigation for calendar view */}
+              {calendarViewMode === 'calendar' && (
+                <div className="flex items-center gap-2">
+                  <button onClick={() => navigateMonth(-1)} className="p-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-50">
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="text-sm font-medium capitalize min-w-[120px] text-center">{currentMonthName}</span>
+                  <button onClick={() => navigateMonth(1)} className="p-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-50">
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Filters */}
@@ -1127,99 +1231,348 @@ export default function App() {
 
             <h3 className="font-bold text-lg mb-4 text-slate-700">Selecciona tus días disponibles</h3>
 
-            {/* Calendar Grid */}
-            <div className="grid grid-cols-1 gap-3">
-              {filteredDays.map((day, idx) => {
-                const { colorClass, statusIcon, isUserAvailable, voteCount, totalMembers, isStarred, starCount, hasMyMessage, messageCount } = getDayStatus(day.dateStr);
+            {/* ========== LIST VIEW ========== */}
+            {calendarViewMode === 'list' && (
+              <div className="grid grid-cols-1 gap-3">
+                {filteredDays.map((day, idx) => {
+                  const { colorClass, statusIcon, isUserAvailable, voteCount, totalMembers, isStarred, starCount, hasMyMessage, messageCount } = getDayStatus(day.dateStr);
+                  const isNewMonth = idx === 0 || filteredDays[idx - 1]?.monthKey !== day.monthKey;
 
-                // Check if this is the first day of a new month
-                const isNewMonth = idx === 0 || filteredDays[idx - 1]?.monthKey !== day.monthKey;
-
-                return (
-                  <div key={day.dateStr}>
-                    {/* Month Header */}
-                    {isNewMonth && (
-                      <div
-                        ref={el => monthRefs.current[day.monthKey] = el}
-                        className="text-lg font-bold text-slate-700 capitalize mb-3 mt-4 first:mt-0 flex items-center gap-2"
-                      >
-                        <Calendar className="w-5 h-5 text-indigo-500" />
-                        {day.monthName} {day.year !== new Date().getFullYear() && day.year}
-                      </div>
-                    )}
-
-                    <div
-                      onClick={() => toggleDateAvailability(day.dateStr)}
-                      className={`
-                        relative overflow-hidden cursor-pointer transition-all duration-200
-                        rounded-xl border-2 p-4 flex items-center justify-between
-                        ${isUserAvailable ? 'border-indigo-600 bg-indigo-50' : 'border-transparent bg-white shadow-sm hover:shadow-md'}
-                      `}
-                    >
-                      {/* User indicator */}
-                      {isUserAvailable && (
-                        <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-600"></div>
+                  return (
+                    <div key={day.dateStr}>
+                      {isNewMonth && (
+                        <div
+                          ref={el => monthRefs.current[day.monthKey] = el}
+                          className="text-lg font-bold text-slate-700 capitalize mb-3 mt-4 first:mt-0 flex items-center gap-2"
+                        >
+                          <Calendar className="w-5 h-5 text-indigo-500" />
+                          {day.monthName} {day.year !== new Date().getFullYear() && day.year}
+                        </div>
                       )}
 
-                      {/* Date Info */}
-                      <div className="flex items-center gap-4">
-                        <div className={`
-                          flex flex-col items-center justify-center w-12 h-12 rounded-lg
-                          ${isUserAvailable ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'}
-                        `}>
-                          <span className="text-[10px] uppercase font-bold">{day.monthName.substring(0, 3)}</span>
-                          <span className="text-lg font-bold leading-none">{day.dayNum}</span>
+                      <div
+                        onClick={() => toggleDateAvailability(day.dateStr)}
+                        className={`
+                          relative overflow-hidden cursor-pointer transition-all duration-200
+                          rounded-xl border-2 p-4 flex items-center justify-between
+                          ${isUserAvailable ? 'border-indigo-600 bg-indigo-50' : 'border-transparent bg-white shadow-sm hover:shadow-md'}
+                        `}
+                      >
+                        {isUserAvailable && (
+                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-600"></div>
+                        )}
+
+                        <div className="flex items-center gap-4">
+                          <div className={`
+                            flex flex-col items-center justify-center w-12 h-12 rounded-lg
+                            ${isUserAvailable ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'}
+                          `}>
+                            <span className="text-[10px] uppercase font-bold">{day.monthName.substring(0, 3)}</span>
+                            <span className="text-lg font-bold leading-none">{day.dayNum}</span>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-slate-700 capitalize">{day.dayName}</p>
+                            <div className="flex items-center gap-2">
+                              {isUserAvailable && (
+                                <span className="text-xs text-indigo-600 font-medium flex items-center gap-1">
+                                  <Check className="w-3 h-3" /> Disponible
+                                </span>
+                              )}
+                              {starCount > 0 && (
+                                <span className="text-xs text-yellow-600 flex items-center gap-0.5">
+                                  <Star className="w-3 h-3 fill-yellow-400" /> {starCount}
+                                </span>
+                              )}
+                              {messageCount > 0 && (
+                                <span className="text-xs text-slate-400 flex items-center gap-0.5">
+                                  <MessageCircle className="w-3 h-3" /> {messageCount}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-semibold text-slate-700 capitalize">{day.dayName}</p>
-                          <div className="flex items-center gap-2">
-                            {isUserAvailable && (
-                              <span className="text-xs text-indigo-600 font-medium flex items-center gap-1">
-                                <Check className="w-3 h-3" /> Disponible
-                              </span>
-                            )}
-                            {starCount > 0 && (
-                              <span className="text-xs text-yellow-600 flex items-center gap-0.5">
-                                <Star className="w-3 h-3 fill-yellow-400" /> {starCount}
-                              </span>
-                            )}
-                            {messageCount > 0 && (
-                              <span className="text-xs text-slate-400 flex items-center gap-0.5">
-                                <MessageCircle className="w-3 h-3" /> {messageCount}
-                              </span>
-                            )}
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => toggleStar(day.dateStr, e)}
+                            className={`p-2 rounded-full transition ${isStarred ? 'bg-yellow-100 text-yellow-600' : 'bg-slate-100 text-slate-400 hover:bg-yellow-50'}`}
+                            title="Marcar como favorito"
+                          >
+                            <Star className={`w-4 h-4 ${isStarred ? 'fill-yellow-400' : ''}`} />
+                          </button>
+                          <button
+                            onClick={(e) => openMessageModal(day.dateStr, e)}
+                            className={`p-2 rounded-full transition ${hasMyMessage ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400 hover:bg-indigo-50'}`}
+                            title="Agregar nota"
+                          >
+                            <MessageCircle className={`w-4 h-4 ${hasMyMessage ? 'fill-indigo-200' : ''}`} />
+                          </button>
+                          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold ${colorClass}`}>
+                            {statusIcon}
+                            <span>{voteCount}/{totalMembers}</span>
                           </div>
                         </div>
                       </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
-                      {/* Actions */}
-                      <div className="flex items-center gap-2">
+            {/* ========== GRID VIEW (2 columns) ========== */}
+            {calendarViewMode === 'grid' && (
+              <div>
+                {(() => {
+                  let currentMonth = '';
+                  return filteredDays.map((day, idx) => {
+                    const { colorClass, isUserAvailable, voteCount, totalMembers, isStarred, starCount, hasMyMessage, messageCount, statusType } = getDayStatus(day.dateStr);
+                    const isNewMonth = day.monthKey !== currentMonth;
+                    if (isNewMonth) currentMonth = day.monthKey;
+
+                    const statusBg = statusType === 'green' ? 'bg-green-500' : statusType === 'yellow' ? 'bg-yellow-400' : 'bg-red-400';
+
+                    return (
+                      <div key={day.dateStr}>
+                        {isNewMonth && (
+                          <div
+                            ref={el => monthRefs.current[day.monthKey] = el}
+                            className="text-lg font-bold text-slate-700 capitalize mb-3 mt-4 first:mt-0 flex items-center gap-2 col-span-2"
+                          >
+                            <Calendar className="w-5 h-5 text-indigo-500" />
+                            {day.monthName} {day.year !== new Date().getFullYear() && day.year}
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-2 mb-2">
+                          <div
+                            onClick={() => toggleDateAvailability(day.dateStr)}
+                            className={`
+                              cursor-pointer transition-all rounded-xl p-3
+                              ${isUserAvailable ? 'bg-indigo-100 border-2 border-indigo-500' : 'bg-white border border-slate-100 shadow-sm hover:shadow-md'}
+                            `}
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm ${isUserAvailable ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                                  {day.dayNum}
+                                </span>
+                                <div>
+                                  <p className="text-xs font-medium text-slate-600 capitalize">{day.dayName.substring(0, 3)}</p>
+                                </div>
+                              </div>
+                              <div className={`w-3 h-3 rounded-full ${statusBg}`}></div>
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-slate-500">{voteCount}/{totalMembers}</span>
+                              <div className="flex items-center gap-1">
+                                {isStarred && <Star className="w-3 h-3 text-yellow-500 fill-yellow-400" />}
+                                {messageCount > 0 && <MessageCircle className="w-3 h-3 text-slate-400" />}
+                              </div>
+                            </div>
+
+                            <div className="flex gap-1 mt-2">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); toggleStar(day.dateStr, e); }}
+                                className={`flex-1 py-1 rounded text-xs ${isStarred ? 'bg-yellow-100 text-yellow-600' : 'bg-slate-50 text-slate-400'}`}
+                              >
+                                <Star className={`w-3 h-3 mx-auto ${isStarred ? 'fill-yellow-400' : ''}`} />
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openMessageModal(day.dateStr, e); }}
+                                className={`flex-1 py-1 rounded text-xs ${hasMyMessage ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}
+                              >
+                                <MessageCircle className="w-3 h-3 mx-auto" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Second column - next day if exists */}
+                          {filteredDays[idx + 1] && (() => {
+                            const nextDay = filteredDays[idx + 1];
+                            if (nextDay.monthKey !== day.monthKey) return null;
+                            const nextStatus = getDayStatus(nextDay.dateStr);
+                            const nextStatusBg = nextStatus.statusType === 'green' ? 'bg-green-500' : nextStatus.statusType === 'yellow' ? 'bg-yellow-400' : 'bg-red-400';
+
+                            return (
+                              <div
+                                onClick={() => toggleDateAvailability(nextDay.dateStr)}
+                                className={`
+                                  cursor-pointer transition-all rounded-xl p-3
+                                  ${nextStatus.isUserAvailable ? 'bg-indigo-100 border-2 border-indigo-500' : 'bg-white border border-slate-100 shadow-sm hover:shadow-md'}
+                                `}
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm ${nextStatus.isUserAvailable ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                                      {nextDay.dayNum}
+                                    </span>
+                                    <div>
+                                      <p className="text-xs font-medium text-slate-600 capitalize">{nextDay.dayName.substring(0, 3)}</p>
+                                    </div>
+                                  </div>
+                                  <div className={`w-3 h-3 rounded-full ${nextStatusBg}`}></div>
+                                </div>
+
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-slate-500">{nextStatus.voteCount}/{nextStatus.totalMembers}</span>
+                                  <div className="flex items-center gap-1">
+                                    {nextStatus.isStarred && <Star className="w-3 h-3 text-yellow-500 fill-yellow-400" />}
+                                    {nextStatus.messageCount > 0 && <MessageCircle className="w-3 h-3 text-slate-400" />}
+                                  </div>
+                                </div>
+
+                                <div className="flex gap-1 mt-2">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); toggleStar(nextDay.dateStr, e); }}
+                                    className={`flex-1 py-1 rounded text-xs ${nextStatus.isStarred ? 'bg-yellow-100 text-yellow-600' : 'bg-slate-50 text-slate-400'}`}
+                                  >
+                                    <Star className={`w-3 h-3 mx-auto ${nextStatus.isStarred ? 'fill-yellow-400' : ''}`} />
+                                  </button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); openMessageModal(nextDay.dateStr, e); }}
+                                    className={`flex-1 py-1 rounded text-xs ${nextStatus.hasMyMessage ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}
+                                  >
+                                    <MessageCircle className="w-3 h-3 mx-auto" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    );
+                  }).filter((_, idx) => idx % 2 === 0);
+                })()}
+              </div>
+            )}
+
+            {/* ========== CALENDAR VIEW (Traditional) ========== */}
+            {calendarViewMode === 'calendar' && (
+              <div>
+                {/* Days of week header */}
+                <div className="grid grid-cols-7 gap-1 mb-2">
+                  {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map(d => (
+                    <div key={d} className="text-center text-xs font-medium text-slate-400 py-2">{d}</div>
+                  ))}
+                </div>
+
+                {/* Calendar grid */}
+                <div className="grid grid-cols-7 gap-1">
+                  {getCalendarGridDays.map((day, idx) => {
+                    if (!day) {
+                      return <div key={`empty-${idx}`} className="aspect-square"></div>;
+                    }
+
+                    const status = getDayStatus(day.dateStr);
+                    const { isUserAvailable, voteCount, totalMembers, isStarred, statusType } = status;
+                    const statusBg = statusType === 'green' ? 'bg-green-500' : statusType === 'yellow' ? 'bg-yellow-400' : 'bg-red-400';
+                    const isExpanded = expandedDay === day.dateStr;
+
+                    // Filter check
+                    const passesFilter = filter === 'all' ||
+                      (filter === 'available' && isUserAvailable) ||
+                      (filter === 'starred' && isStarred) ||
+                      (filter === 'green' && statusType === 'green') ||
+                      (filter === 'yellow' && statusType === 'yellow') ||
+                      (filter === 'red' && statusType === 'red');
+
+                    if (!passesFilter && filter !== 'all') {
+                      return (
+                        <div
+                          key={day.dateStr}
+                          className="aspect-square bg-slate-50 rounded-lg flex items-center justify-center opacity-30"
+                        >
+                          <span className="text-xs text-slate-400">{day.dayNum}</span>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={day.dateStr}
+                        onClick={() => !day.isPast && setExpandedDay(isExpanded ? null : day.dateStr)}
+                        className={`
+                          aspect-square rounded-lg cursor-pointer transition-all relative
+                          ${day.isPast ? 'opacity-40 cursor-not-allowed' : 'hover:scale-105'}
+                          ${isUserAvailable ? 'bg-indigo-100 border-2 border-indigo-500' : 'bg-white border border-slate-200'}
+                          ${isExpanded ? 'ring-2 ring-indigo-400 ring-offset-2' : ''}
+                        `}
+                      >
+                        <div className="absolute inset-0 flex flex-col items-center justify-center p-1">
+                          <span className={`text-sm font-bold ${isUserAvailable ? 'text-indigo-700' : 'text-slate-700'}`}>
+                            {day.dayNum}
+                          </span>
+                          <div className={`w-2 h-2 rounded-full ${statusBg} mt-0.5`}></div>
+                          {isStarred && (
+                            <Star className="w-2.5 h-2.5 text-yellow-500 fill-yellow-400 absolute top-1 right-1" />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Expanded day detail */}
+                {expandedDay && (() => {
+                  const day = getCalendarGridDays.find(d => d?.dateStr === expandedDay);
+                  if (!day) return null;
+                  const status = getDayStatus(day.dateStr);
+
+                  return (
+                    <div className="mt-4 bg-white rounded-xl border border-slate-200 p-4 shadow-lg">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <h4 className="font-bold text-lg text-slate-800 capitalize">{day.dayName}</h4>
+                          <p className="text-sm text-slate-500">{day.dayNum} de {day.monthName}</p>
+                        </div>
+                        <button onClick={() => setExpandedDay(null)} className="p-1 hover:bg-slate-100 rounded-full">
+                          <X className="w-5 h-5 text-slate-400" />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold ${status.colorClass}`}>
+                          {status.statusIcon}
+                          <span>{status.voteCount}/{status.totalMembers} disponibles</span>
+                        </div>
+                        {status.starCount > 0 && (
+                          <span className="text-xs text-yellow-600 flex items-center gap-1">
+                            <Star className="w-3 h-3 fill-yellow-400" /> {status.starCount} favoritos
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => toggleDateAvailability(day.dateStr)}
+                          className={`flex-1 py-3 rounded-xl font-medium transition ${
+                            status.isUserAvailable
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          {status.isUserAvailable ? '✓ Disponible' : 'Marcar disponible'}
+                        </button>
                         <button
                           onClick={(e) => toggleStar(day.dateStr, e)}
-                          className={`p-2 rounded-full transition ${isStarred ? 'bg-yellow-100 text-yellow-600' : 'bg-slate-100 text-slate-400 hover:bg-yellow-50'}`}
-                          title="Marcar como favorito"
+                          className={`p-3 rounded-xl transition ${status.isStarred ? 'bg-yellow-100 text-yellow-600' : 'bg-slate-100 text-slate-400 hover:bg-yellow-50'}`}
                         >
-                          <Star className={`w-4 h-4 ${isStarred ? 'fill-yellow-400' : ''}`} />
+                          <Star className={`w-5 h-5 ${status.isStarred ? 'fill-yellow-400' : ''}`} />
                         </button>
                         <button
                           onClick={(e) => openMessageModal(day.dateStr, e)}
-                          className={`p-2 rounded-full transition ${hasMyMessage ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400 hover:bg-indigo-50'}`}
-                          title="Agregar nota"
+                          className={`p-3 rounded-xl transition ${status.hasMyMessage ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400 hover:bg-indigo-50'}`}
                         >
-                          <MessageCircle className={`w-4 h-4 ${hasMyMessage ? 'fill-indigo-200' : ''}`} />
+                          <MessageCircle className={`w-5 h-5 ${status.hasMyMessage ? 'fill-indigo-200' : ''}`} />
                         </button>
-                        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold ${colorClass}`}>
-                          {statusIcon}
-                          <span>{voteCount}/{totalMembers}</span>
-                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })()}
+              </div>
+            )}
 
-            {filteredDays.length === 0 && (
+            {filteredDays.length === 0 && calendarViewMode !== 'calendar' && (
               <div className="text-center py-12 text-slate-400">
                 <Filter className="w-12 h-12 mx-auto mb-4 opacity-50" />
                 <p>No hay días que coincidan con el filtro</p>
