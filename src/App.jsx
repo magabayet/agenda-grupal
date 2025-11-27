@@ -50,7 +50,13 @@ import {
   Bell,
   UserCheck,
   Home,
-  CalendarX
+  CalendarX,
+  Search,
+  Archive,
+  Trash2,
+  MoreVertical,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 // --- Configuración de Firebase ---
@@ -93,7 +99,25 @@ export default function App() {
   const [conflictModal, setConflictModal] = useState({ open: false, dateStr: '', conflicts: [], action: null });
   const [confirmPlanModal, setConfirmPlanModal] = useState({ open: false, dateStr: '' });
   const [expandedConfirmed, setExpandedConfirmed] = useState(null); // dateStr del día que tiene el desplegable de confirmados abierto
+
+  // Estados para gestión de grupos en página principal
+  const [groupsCollapsed, setGroupsCollapsed] = useState(false);
+  const [groupSearch, setGroupSearch] = useState('');
+  const [groupMenuOpen, setGroupMenuOpen] = useState(null); // ID del grupo con menú abierto
+  const [deleteGroupModal, setDeleteGroupModal] = useState({ open: false, groupId: '', groupName: '' });
+
   const monthRefs = useRef({});
+
+  // Cerrar menú de grupo al hacer clic fuera
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (groupMenuOpen && !e.target.closest('[data-group-menu]')) {
+        setGroupMenuOpen(null);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [groupMenuOpen]);
 
   // 1. Escuchar estado de autenticación
   useEffect(() => {
@@ -785,6 +809,55 @@ export default function App() {
     setGroupData(null);
     setGroupIdInput('');
     setView('join');
+  };
+
+  // Archivar/Eliminar grupo (remover usuario del grupo)
+  const archiveGroup = async (gId, gName) => {
+    if (!user) return;
+
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      const groupRef = doc(db, 'calendar_groups', gId);
+
+      // Obtener datos actuales del grupo
+      const groupSnap = await getDoc(groupRef);
+      if (groupSnap.exists()) {
+        const gData = groupSnap.data();
+
+        // Remover usuario de la lista de miembros del grupo
+        const updatedMembers = (gData.members || []).filter(m => m.uid !== user.uid);
+
+        // Remover votos del usuario en todas las fechas
+        const updatedVotes = { ...gData.votes };
+        for (const dateStr in updatedVotes) {
+          if (Array.isArray(updatedVotes[dateStr])) {
+            updatedVotes[dateStr] = updatedVotes[dateStr].filter(uid => uid !== user.uid);
+          }
+        }
+
+        await updateDoc(groupRef, {
+          members: updatedMembers,
+          votes: updatedVotes
+        });
+      }
+
+      // Remover grupo de la lista del usuario
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const uData = userSnap.data();
+        const updatedGroups = (uData.groups || []).filter(g => g !== gId);
+        await updateDoc(userRef, { groups: updatedGroups });
+      }
+
+      // Actualizar estado local
+      setUserGroups(prev => prev.filter(g => g.id !== gId));
+      setDeleteGroupModal({ open: false, groupId: '', groupName: '' });
+      setGroupMenuOpen(null);
+      showNotification(`Saliste del grupo "${gName}"`);
+    } catch (e) {
+      console.error("Error al salir del grupo:", e);
+      showNotification('Error al salir del grupo');
+    }
   };
 
   // --- Generación de Calendario (solo fechas futuras) ---
@@ -1537,6 +1610,47 @@ export default function App() {
         </div>
       )}
 
+      {/* Delete/Leave Group Modal */}
+      {deleteGroupModal.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <div className="bg-red-100 p-2 rounded-full">
+                  <Trash2 className="w-5 h-5 text-red-600" />
+                </div>
+                <h3 className="font-bold text-lg">Salir del grupo</h3>
+              </div>
+              <button onClick={() => setDeleteGroupModal({ open: false, groupId: '', groupName: '' })} className="p-1 hover:bg-slate-100 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-600 mb-2">
+              ¿Estás seguro que deseas salir del grupo <strong>"{deleteGroupModal.groupName}"</strong>?
+            </p>
+            <p className="text-xs text-slate-400 mb-4">
+              Tu disponibilidad y votos serán eliminados del grupo. Puedes volver a unirte con el código.
+            </p>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDeleteGroupModal({ open: false, groupId: '', groupName: '' })}
+                className="flex-1 py-3 border border-slate-200 text-slate-600 rounded-xl font-medium hover:bg-slate-50 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => archiveGroup(deleteGroupModal.groupId, deleteGroupModal.groupName)}
+                className="flex-1 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition flex items-center justify-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" /> Salir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-md mx-auto px-4 mt-6 pb-32">
 
         {/* VIEW: LOGIN */}
@@ -1745,80 +1859,168 @@ export default function App() {
               )}
             </div>
 
-            {/* Separador */}
-            <div className="relative flex py-2 items-center">
-              <div className="flex-grow border-t border-slate-200"></div>
-              <span className="flex-shrink mx-4 text-slate-400 text-sm">Mis grupos</span>
-              <div className="flex-grow border-t border-slate-200"></div>
-            </div>
+            {/* ========== SECCIÓN DE GRUPOS ========== */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              {/* Header de grupos con controles */}
+              <div className="p-3 border-b border-slate-100">
+                <div className="flex items-center justify-between mb-2">
+                  <button
+                    onClick={() => setGroupsCollapsed(!groupsCollapsed)}
+                    className="flex items-center gap-2 text-slate-700 font-semibold hover:text-indigo-600 transition"
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>Mis grupos ({userGroups.length})</span>
+                    {groupsCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                  </button>
+                </div>
 
-            {/* Grupos anteriores */}
-            {userGroups.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-sm font-semibold text-slate-500 mb-3 flex items-center gap-2">
-                  <Users className="w-4 h-4" /> Tus grupos
-                </h3>
-                <div className="space-y-3">
-                  {userGroups.map((group) => (
-                    <button
-                      key={group.id}
-                      onClick={() => {
-                        setGroupId(group.id);
-                        setView('calendar');
-                      }}
-                      className="w-full p-4 bg-white rounded-xl border border-slate-100 shadow-sm hover:shadow-md hover:border-indigo-200 transition text-left group"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          {/* Nombre del grupo o código como título */}
-                          <h4 className="font-semibold text-slate-800 text-lg truncate">
-                            {group.name || `Grupo ${group.id}`}
-                          </h4>
+                {/* Barra de búsqueda - solo si hay grupos y no está colapsado */}
+                {!groupsCollapsed && userGroups.length > 0 && (
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Buscar grupo..."
+                      value={groupSearch}
+                      onChange={(e) => setGroupSearch(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition"
+                    />
+                    {groupSearch && (
+                      <button
+                        onClick={() => setGroupSearch('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
 
-                          {/* Descripción si existe */}
-                          {group.description && (
-                            <p className="text-sm text-slate-500 mt-0.5 line-clamp-2">{group.description}</p>
-                          )}
+              {/* Lista de grupos */}
+              {!groupsCollapsed && (
+                <div className="divide-y divide-slate-100">
+                  {userGroups.length === 0 ? (
+                    <div className="p-6 text-center text-slate-400">
+                      <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No tienes grupos aún</p>
+                    </div>
+                  ) : (
+                    (() => {
+                      const filteredGroups = userGroups.filter(group => {
+                        if (!groupSearch) return true;
+                        const search = groupSearch.toLowerCase();
+                        return (
+                          (group.name || '').toLowerCase().includes(search) ||
+                          (group.description || '').toLowerCase().includes(search) ||
+                          group.id.toLowerCase().includes(search)
+                        );
+                      });
 
-                          {/* Código y miembros */}
-                          <div className="flex items-center gap-3 mt-2">
-                            <span className="bg-indigo-100 text-indigo-600 font-mono font-bold px-2 py-1 rounded text-xs">
-                              {group.id}
-                            </span>
-                            <span className="text-xs text-slate-400">
-                              {group.memberCount} miembro{group.memberCount !== 1 ? 's' : ''}
-                            </span>
+                      if (filteredGroups.length === 0) {
+                        return (
+                          <div className="p-6 text-center text-slate-400">
+                            <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">No se encontraron grupos</p>
                           </div>
+                        );
+                      }
 
-                          {/* Avatares de miembros */}
-                          <div className="flex -space-x-2 mt-2">
-                            {group.members.slice(0, 5).map((m, idx) => (
-                              m.photoURL ? (
-                                <img key={idx} src={m.photoURL} alt={m.name} className="w-6 h-6 rounded-full border-2 border-white" />
-                              ) : (
-                                <div key={idx} className="w-6 h-6 rounded-full bg-indigo-400 border-2 border-white flex items-center justify-center text-white text-[10px] font-medium">
-                                  {m.name?.charAt(0)}
-                                </div>
-                              )
-                            ))}
-                            {group.members.length > 5 && (
-                              <div className="w-6 h-6 rounded-full bg-slate-200 border-2 border-white flex items-center justify-center text-slate-500 text-[10px] font-medium">
-                                +{group.members.length - 5}
+                      return filteredGroups.map((group) => (
+                        <div
+                          key={group.id}
+                          className="relative flex items-center gap-3 p-3 hover:bg-slate-50 transition"
+                        >
+                          {/* Contenido clickeable del grupo */}
+                          <button
+                            onClick={() => {
+                              setGroupId(group.id);
+                              setView('calendar');
+                              setGroupMenuOpen(null);
+                            }}
+                            className="flex-1 flex items-center gap-3 text-left min-w-0"
+                          >
+                            {/* Avatar del grupo */}
+                            <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                              <span className="text-indigo-600 font-bold text-sm">
+                                {(group.name || group.id).charAt(0).toUpperCase()}
+                              </span>
+                            </div>
+
+                            {/* Info del grupo */}
+                            <div className="flex-1 min-w-0">
+                              <h4 className="font-medium text-slate-800 truncate text-sm">
+                                {group.name || `Grupo ${group.id}`}
+                              </h4>
+                              <div className="flex items-center gap-2 text-xs text-slate-400">
+                                <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">{group.id}</span>
+                                <span>·</span>
+                                <span>{group.memberCount} miembro{group.memberCount !== 1 ? 's' : ''}</span>
+                              </div>
+                            </div>
+
+                            {/* Avatares mini */}
+                            <div className="hidden sm:flex -space-x-1.5 flex-shrink-0">
+                              {group.members.slice(0, 3).map((m, idx) => (
+                                m.photoURL ? (
+                                  <img key={idx} src={m.photoURL} alt={m.name} className="w-5 h-5 rounded-full border border-white" />
+                                ) : (
+                                  <div key={idx} className="w-5 h-5 rounded-full bg-indigo-400 border border-white flex items-center justify-center text-white text-[8px] font-medium">
+                                    {m.name?.charAt(0)}
+                                  </div>
+                                )
+                              ))}
+                            </div>
+                          </button>
+
+                          {/* Botón de menú */}
+                          <div className="relative flex-shrink-0" data-group-menu>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setGroupMenuOpen(groupMenuOpen === group.id ? null : group.id);
+                              }}
+                              className="p-2 rounded-lg hover:bg-slate-200 transition text-slate-400 hover:text-slate-600"
+                            >
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
+
+                            {/* Menú desplegable */}
+                            {groupMenuOpen === group.id && (
+                              <div className="absolute right-0 top-full mt-1 bg-white rounded-xl shadow-lg border border-slate-200 py-1 z-10 min-w-[160px]">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setGroupId(group.id);
+                                    setView('calendar');
+                                    setGroupMenuOpen(null);
+                                  }}
+                                  className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                                >
+                                  <Calendar className="w-4 h-4" />
+                                  Abrir calendario
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteGroupModal({ open: true, groupId: group.id, groupName: group.name || `Grupo ${group.id}` });
+                                    setGroupMenuOpen(null);
+                                  }}
+                                  className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  Salir del grupo
+                                </button>
                               </div>
                             )}
                           </div>
                         </div>
-
-                        {/* Icono de acceso */}
-                        <div className="text-indigo-600 opacity-0 group-hover:opacity-100 transition mt-1">
-                          <Calendar className="w-5 h-5" />
-                        </div>
-                      </div>
-                    </button>
-                  ))}
+                      ));
+                    })()
+                  )}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             <button
               onClick={openCreateGroupModal}
