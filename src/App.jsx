@@ -374,10 +374,7 @@ export default function App() {
 
   const openMessageModal = (dateStr, e) => {
     e.stopPropagation();
-    const currentMessages = groupData?.messages || {};
-    const dateMessages = currentMessages[dateStr] || {};
-    const myMessage = dateMessages[user.uid] || '';
-    setMessageModal({ open: true, dateStr, message: myMessage });
+    setMessageModal({ open: true, dateStr, message: '' });
   };
 
   const saveMessage = async () => {
@@ -385,11 +382,45 @@ export default function App() {
 
     const groupRef = doc(db, 'calendar_groups', groupId);
 
+    // Crear nuevo mensaje con timestamp
+    const newMessage = {
+      uid: user.uid,
+      name: user.displayName,
+      photoURL: user.photoURL || '',
+      text: messageModal.message.trim(),
+      timestamp: new Date().toISOString()
+    };
+
+    // Obtener mensajes existentes del día (puede ser array nuevo o formato antiguo)
+    const existingMessages = groupData.messages?.[messageModal.dateStr];
+    let updatedMessages;
+
+    if (Array.isArray(existingMessages)) {
+      // Ya es un array, agregar el nuevo mensaje
+      updatedMessages = [...existingMessages, newMessage];
+    } else if (existingMessages && typeof existingMessages === 'object') {
+      // Formato antiguo { uid: "mensaje" }, migrar a array
+      const migratedMessages = Object.entries(existingMessages).map(([uid, text]) => {
+        const member = groupData.members?.find(m => m.uid === uid);
+        return {
+          uid,
+          name: member?.name || 'Usuario',
+          photoURL: member?.photoURL || '',
+          text,
+          timestamp: new Date(0).toISOString() // Fecha antigua para ordenar primero
+        };
+      });
+      updatedMessages = [...migratedMessages, newMessage];
+    } else {
+      // No hay mensajes previos
+      updatedMessages = [newMessage];
+    }
+
     try {
       await updateDoc(groupRef, {
-        [`messages.${messageModal.dateStr}.${user.uid}`]: messageModal.message.trim()
+        [`messages.${messageModal.dateStr}`]: updatedMessages
       });
-      // Solo limpiar el campo de mensaje, mantener el modal abierto para chat continuo
+      // Limpiar el campo de mensaje, mantener el modal abierto
       setMessageModal(prev => ({ ...prev, message: '' }));
     } catch (e) {
       console.error("Error al guardar mensaje", e);
@@ -522,9 +553,18 @@ export default function App() {
     const isStarred = stars.includes(user?.uid);
     const starCount = stars.length;
 
-    const messages = groupData.messages?.[dateStr] || {};
-    const hasMyMessage = !!messages[user?.uid];
-    const messageCount = Object.keys(messages).length;
+    const rawMessages = groupData.messages?.[dateStr];
+    let messageCount = 0;
+    let hasMyMessage = false;
+
+    if (Array.isArray(rawMessages)) {
+      messageCount = rawMessages.length;
+      hasMyMessage = rawMessages.some(m => m.uid === user?.uid);
+    } else if (rawMessages && typeof rawMessages === 'object') {
+      // Formato antiguo
+      messageCount = Object.keys(rawMessages).length;
+      hasMyMessage = !!rawMessages[user?.uid];
+    }
 
     // Corregido: >= 50% es amarillo, 100% es verde
     let colorClass = 'bg-red-100 border-red-200 text-red-800';
@@ -710,8 +750,25 @@ export default function App() {
             {/* Messages Area - Chat bubbles */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-100">
               {(() => {
-                const dateMessages = groupData?.messages?.[messageModal.dateStr] || {};
-                const allMessages = Object.entries(dateMessages);
+                const rawMessages = groupData?.messages?.[messageModal.dateStr];
+
+                // Normalizar mensajes (soportar formato antiguo y nuevo)
+                let allMessages = [];
+                if (Array.isArray(rawMessages)) {
+                  allMessages = rawMessages;
+                } else if (rawMessages && typeof rawMessages === 'object') {
+                  // Formato antiguo { uid: "mensaje" }
+                  allMessages = Object.entries(rawMessages).map(([uid, text]) => {
+                    const member = groupData?.members?.find(m => m.uid === uid);
+                    return {
+                      uid,
+                      name: member?.name || 'Usuario',
+                      photoURL: member?.photoURL || '',
+                      text,
+                      timestamp: new Date(0).toISOString()
+                    };
+                  });
+                }
 
                 if (allMessages.length === 0) {
                   return (
@@ -723,21 +780,29 @@ export default function App() {
                   );
                 }
 
-                return allMessages.map(([uid, msg]) => {
-                  const isMe = uid === user?.uid;
-                  const member = groupData?.members?.find(m => m.uid === uid);
+                // Ordenar por timestamp
+                const sortedMessages = [...allMessages].sort((a, b) =>
+                  new Date(a.timestamp) - new Date(b.timestamp)
+                );
+
+                return sortedMessages.map((msg, idx) => {
+                  const isMe = msg.uid === user?.uid;
+                  const time = new Date(msg.timestamp);
+                  const timeStr = time.getFullYear() > 1970
+                    ? time.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+                    : '';
 
                   return (
-                    <div key={uid} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                    <div key={`${msg.uid}-${idx}`} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                       <div className={`flex items-end gap-2 max-w-[80%] ${isMe ? 'flex-row-reverse' : ''}`}>
                         {/* Avatar */}
                         {!isMe && (
                           <div className="flex-shrink-0 mb-1">
-                            {member?.photoURL ? (
-                              <img src={member.photoURL} alt={member.name} className="w-7 h-7 rounded-full" />
+                            {msg.photoURL ? (
+                              <img src={msg.photoURL} alt={msg.name} className="w-7 h-7 rounded-full" />
                             ) : (
                               <div className="w-7 h-7 rounded-full bg-slate-400 flex items-center justify-center text-white text-xs font-medium">
-                                {member?.name?.charAt(0) || '?'}
+                                {msg.name?.charAt(0) || '?'}
                               </div>
                             )}
                           </div>
@@ -747,7 +812,7 @@ export default function App() {
                         <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                           {!isMe && (
                             <span className="text-[10px] text-slate-500 ml-1 mb-0.5">
-                              {member?.name?.split(' ')[0] || 'Usuario'}
+                              {msg.name?.split(' ')[0] || 'Usuario'}
                             </span>
                           )}
                           <div
@@ -759,11 +824,11 @@ export default function App() {
                               }
                             `}
                           >
-                            {msg}
+                            {msg.text}
                           </div>
-                          {isMe && (
-                            <span className="text-[10px] text-slate-400 mr-1 mt-0.5">Tú</span>
-                          )}
+                          <span className="text-[10px] text-slate-400 mx-1 mt-0.5">
+                            {isMe ? 'Tú' : ''} {timeStr && `· ${timeStr}`}
+                          </span>
                         </div>
                       </div>
                     </div>
