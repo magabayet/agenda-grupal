@@ -14,7 +14,8 @@ import {
   getDoc,
   onSnapshot,
   updateDoc,
-  arrayUnion
+  arrayUnion,
+  deleteField
 } from 'firebase/firestore';
 import {
   Calendar,
@@ -39,7 +40,12 @@ import {
   Grid,
   CalendarDays,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  CheckCheck,
+  Ban,
+  Lock,
+  AlertTriangle,
+  Bell
 } from 'lucide-react';
 
 // --- Configuración de Firebase ---
@@ -77,6 +83,10 @@ export default function App() {
     return { year: now.getFullYear(), month: now.getMonth() };
   });
   const [expandedDay, setExpandedDay] = useState(null);
+  const [userData, setUserData] = useState(null); // Datos completos del usuario (blockedDays, confirmedPlans, etc.)
+  const [blockDayModal, setBlockDayModal] = useState({ open: false, dateStr: '', reason: '' });
+  const [conflictModal, setConflictModal] = useState({ open: false, dateStr: '', conflicts: [], action: null });
+  const [confirmPlanModal, setConfirmPlanModal] = useState({ open: false, dateStr: '' });
   const monthRefs = useRef({});
 
   // 1. Escuchar estado de autenticación
@@ -94,6 +104,23 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // 1.5 Escuchar cambios en los datos del usuario (blockedDays, confirmedPlans, lastSeenMessages)
+  useEffect(() => {
+    if (!user) {
+      setUserData(null);
+      return;
+    }
+
+    const userRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(userRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setUserData(docSnap.data());
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   // Cargar grupos del usuario
   const loadUserGroups = async (uid) => {
@@ -325,15 +352,42 @@ export default function App() {
     }
   };
 
-  const toggleDateAvailability = async (dateStr) => {
+  const toggleDateAvailability = async (dateStr, skipConflictCheck = false) => {
     if (!user || !groupId || !groupData) return;
 
-    const groupRef = doc(db, 'calendar_groups', groupId);
     const currentVotes = groupData.votes || {};
     const dateVotes = currentVotes[dateStr] || [];
+    const isCurrentlyAvailable = dateVotes.includes(user.uid);
 
+    // Si va a marcar como disponible, verificar conflictos
+    if (!isCurrentlyAvailable && !skipConflictCheck) {
+      // Verificar si el día está bloqueado
+      if (userData?.blockedDays?.[dateStr]) {
+        showNotification('Este día está bloqueado. Desbloquéalo primero.');
+        return;
+      }
+
+      // Verificar si hay plan confirmado en otro grupo
+      const confirmedPlan = userData?.confirmedPlans?.[dateStr];
+      if (confirmedPlan && confirmedPlan.groupId !== groupId) {
+        setConflictModal({
+          open: true,
+          dateStr,
+          conflicts: [{
+            type: 'confirmed',
+            groupName: confirmedPlan.groupName,
+            groupId: confirmedPlan.groupId
+          }],
+          action: 'availability'
+        });
+        return;
+      }
+    }
+
+    // Ejecutar el cambio
+    const groupRef = doc(db, 'calendar_groups', groupId);
     let newDateVotes;
-    if (dateVotes.includes(user.uid)) {
+    if (isCurrentlyAvailable) {
       newDateVotes = dateVotes.filter(uid => uid !== user.uid);
     } else {
       newDateVotes = [...dateVotes, user.uid];
@@ -346,6 +400,186 @@ export default function App() {
     } catch (e) {
       console.error("Error al votar", e);
     }
+  };
+
+  // --- Bloquear día personal ---
+  const openBlockDayModal = (dateStr, e) => {
+    if (e) e.stopPropagation();
+    const existingReason = userData?.blockedDays?.[dateStr]?.reason || '';
+    setBlockDayModal({ open: true, dateStr, reason: existingReason });
+  };
+
+  const blockDay = async () => {
+    if (!user || !blockDayModal.dateStr) return;
+
+    const dateStr = blockDayModal.dateStr;
+    const userRef = doc(db, 'users', user.uid);
+
+    try {
+      // Guardar día bloqueado en perfil del usuario
+      await updateDoc(userRef, {
+        [`blockedDays.${dateStr}`]: {
+          reason: blockDayModal.reason.trim(),
+          blockedAt: new Date().toISOString()
+        }
+      });
+
+      // Remover disponibilidad de todos los grupos del usuario
+      const groupIds = userData?.groups || [];
+      for (const gId of groupIds) {
+        try {
+          const groupRef = doc(db, 'calendar_groups', gId);
+          const groupSnap = await getDoc(groupRef);
+          if (groupSnap.exists()) {
+            const gData = groupSnap.data();
+            const votes = gData.votes?.[dateStr] || [];
+            if (votes.includes(user.uid)) {
+              await updateDoc(groupRef, {
+                [`votes.${dateStr}`]: votes.filter(uid => uid !== user.uid)
+              });
+            }
+          }
+        } catch (err) {
+          console.error(`Error actualizando grupo ${gId}:`, err);
+        }
+      }
+
+      setBlockDayModal({ open: false, dateStr: '', reason: '' });
+      showNotification('Día bloqueado en todos tus grupos');
+    } catch (e) {
+      console.error("Error al bloquear día", e);
+      showNotification('Error al bloquear día');
+    }
+  };
+
+  const unblockDay = async (dateStr) => {
+    if (!user) return;
+
+    const userRef = doc(db, 'users', user.uid);
+
+    try {
+      await updateDoc(userRef, {
+        [`blockedDays.${dateStr}`]: deleteField()
+      });
+      showNotification('Día desbloqueado');
+    } catch (e) {
+      console.error("Error al desbloquear día", e);
+    }
+  };
+
+  // --- Confirmar plan ---
+  const openConfirmPlanModal = (dateStr, e) => {
+    if (e) e.stopPropagation();
+    setConfirmPlanModal({ open: true, dateStr });
+  };
+
+  const confirmPlan = async () => {
+    if (!user || !groupId || !groupData || !confirmPlanModal.dateStr) return;
+
+    const dateStr = confirmPlanModal.dateStr;
+    const userRef = doc(db, 'users', user.uid);
+    const groupRef = doc(db, 'calendar_groups', groupId);
+
+    try {
+      // Guardar plan confirmado en perfil del usuario
+      await updateDoc(userRef, {
+        [`confirmedPlans.${dateStr}`]: {
+          groupId: groupId,
+          groupName: groupData.name || `Grupo ${groupId}`,
+          confirmedAt: new Date().toISOString()
+        }
+      });
+
+      // Marcar en el grupo que hay un plan confirmado
+      await updateDoc(groupRef, {
+        [`confirmedDay`]: {
+          dateStr,
+          confirmedBy: user.uid,
+          confirmedAt: new Date().toISOString()
+        }
+      });
+
+      // Remover disponibilidad de otros grupos para ese día
+      const groupIds = userData?.groups || [];
+      for (const gId of groupIds) {
+        if (gId === groupId) continue; // No modificar el grupo actual
+        try {
+          const otherGroupRef = doc(db, 'calendar_groups', gId);
+          const groupSnap = await getDoc(otherGroupRef);
+          if (groupSnap.exists()) {
+            const gData = groupSnap.data();
+            const votes = gData.votes?.[dateStr] || [];
+            if (votes.includes(user.uid)) {
+              await updateDoc(otherGroupRef, {
+                [`votes.${dateStr}`]: votes.filter(uid => uid !== user.uid)
+              });
+            }
+          }
+        } catch (err) {
+          console.error(`Error actualizando grupo ${gId}:`, err);
+        }
+      }
+
+      setConfirmPlanModal({ open: false, dateStr: '' });
+      showNotification('¡Plan confirmado! Tu disponibilidad fue removida de otros grupos.');
+    } catch (e) {
+      console.error("Error al confirmar plan", e);
+      showNotification('Error al confirmar plan');
+    }
+  };
+
+  const cancelConfirmedPlan = async (dateStr) => {
+    if (!user || !groupId) return;
+
+    const userRef = doc(db, 'users', user.uid);
+    const groupRef = doc(db, 'calendar_groups', groupId);
+
+    try {
+      await updateDoc(userRef, {
+        [`confirmedPlans.${dateStr}`]: deleteField()
+      });
+
+      // Si el confirmedDay del grupo es este, eliminarlo
+      if (groupData?.confirmedDay?.dateStr === dateStr) {
+        await updateDoc(groupRef, {
+          confirmedDay: deleteField()
+        });
+      }
+
+      showNotification('Plan cancelado');
+    } catch (e) {
+      console.error("Error al cancelar plan", e);
+    }
+  };
+
+  // --- Marcar mensajes como leídos ---
+  const markMessagesAsRead = async (dateStr, messageCount) => {
+    if (!user || !groupId || messageCount === 0) return;
+
+    const userRef = doc(db, 'users', user.uid);
+
+    try {
+      await updateDoc(userRef, {
+        [`lastSeenMessages.${groupId}.${dateStr}`]: messageCount
+      });
+    } catch (e) {
+      console.error("Error al marcar mensajes como leídos", e);
+    }
+  };
+
+  // Función helper para contar mensajes sin leer
+  const getUnreadMessageCount = (dateStr) => {
+    const rawMessages = groupData?.messages?.[dateStr];
+    let totalMessages = 0;
+
+    if (Array.isArray(rawMessages)) {
+      totalMessages = rawMessages.length;
+    } else if (rawMessages && typeof rawMessages === 'object') {
+      totalMessages = Object.keys(rawMessages).length;
+    }
+
+    const seenCount = userData?.lastSeenMessages?.[groupId]?.[dateStr] || 0;
+    return Math.max(0, totalMessages - seenCount);
   };
 
   const toggleStar = async (dateStr, e) => {
@@ -375,6 +609,18 @@ export default function App() {
   const openMessageModal = (dateStr, e) => {
     e.stopPropagation();
     setMessageModal({ open: true, dateStr, message: '' });
+
+    // Marcar mensajes como leídos
+    const rawMessages = groupData?.messages?.[dateStr];
+    let messageCount = 0;
+    if (Array.isArray(rawMessages)) {
+      messageCount = rawMessages.length;
+    } else if (rawMessages && typeof rawMessages === 'object') {
+      messageCount = Object.keys(rawMessages).length;
+    }
+    if (messageCount > 0) {
+      markMessagesAsRead(dateStr, messageCount);
+    }
   };
 
   const saveMessage = async () => {
@@ -540,7 +786,7 @@ export default function App() {
 
   // --- Cálculo de Estado (Semáforo) ---
   const getDayStatus = (dateStr) => {
-    if (!groupData) return { colorClass: 'bg-slate-100 border-slate-200 text-slate-500', statusIcon: <XCircle className="w-4 h-4" />, isUserAvailable: false, voteCount: 0, totalMembers: 1, percentage: 0, isStarred: false, starCount: 0 };
+    if (!groupData) return { colorClass: 'bg-slate-100 border-slate-200 text-slate-500', statusIcon: <XCircle className="w-4 h-4" />, isUserAvailable: false, voteCount: 0, totalMembers: 1, percentage: 0, isStarred: false, starCount: 0, isBlocked: false, isConfirmed: false, confirmedInOtherGroup: null, unreadCount: 0 };
 
     const totalMembers = groupData.members?.length || 1;
     const votes = groupData.votes?.[dateStr] || [];
@@ -566,12 +812,28 @@ export default function App() {
       hasMyMessage = !!rawMessages[user?.uid];
     }
 
+    // Estados de bloqueo y confirmación
+    const isBlocked = !!userData?.blockedDays?.[dateStr];
+    const blockReason = userData?.blockedDays?.[dateStr]?.reason || '';
+
+    const confirmedPlan = userData?.confirmedPlans?.[dateStr];
+    const isConfirmed = confirmedPlan?.groupId === groupId;
+    const confirmedInOtherGroup = confirmedPlan && confirmedPlan.groupId !== groupId ? confirmedPlan : null;
+
+    // Mensajes sin leer
+    const seenCount = userData?.lastSeenMessages?.[groupId]?.[dateStr] || 0;
+    const unreadCount = Math.max(0, messageCount - seenCount);
+
     // Corregido: >= 50% es amarillo, 100% es verde
     let colorClass = 'bg-red-100 border-red-200 text-red-800';
     let statusIcon = <XCircle className="w-4 h-4" />;
     let statusType = 'red';
 
-    if (percentage === 1 && voteCount > 0) {
+    if (isBlocked) {
+      colorClass = 'bg-slate-200 border-slate-300 text-slate-600';
+      statusIcon = <Lock className="w-4 h-4" />;
+      statusType = 'blocked';
+    } else if (percentage === 1 && voteCount > 0) {
       colorClass = 'bg-green-100 border-green-200 text-green-800';
       statusIcon = <CheckCircle className="w-4 h-4" />;
       statusType = 'green';
@@ -581,7 +843,7 @@ export default function App() {
       statusType = 'yellow';
     }
 
-    return { colorClass, statusIcon, isUserAvailable, voteCount, totalMembers, percentage, isStarred, starCount, hasMyMessage, messageCount, statusType };
+    return { colorClass, statusIcon, isUserAvailable, voteCount, totalMembers, percentage, isStarred, starCount, hasMyMessage, messageCount, statusType, isBlocked, blockReason, isConfirmed, confirmedInOtherGroup, unreadCount };
   };
 
   // Filtrar días según el filtro seleccionado
@@ -1029,6 +1291,167 @@ export default function App() {
         </div>
       )}
 
+      {/* Block Day Modal */}
+      {blockDayModal.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <div className="bg-slate-100 p-2 rounded-full">
+                  <Ban className="w-5 h-5 text-slate-600" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg">Bloquear día</h3>
+                  <p className="text-xs text-slate-500">
+                    {new Date(blockDayModal.dateStr).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setBlockDayModal({ open: false, dateStr: '', reason: '' })} className="p-1 hover:bg-slate-100 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4">
+              <p className="text-sm text-amber-800">
+                <AlertTriangle className="w-4 h-4 inline mr-1" />
+                Esto bloqueará el día en <strong>todos tus grupos</strong> y removerá tu disponibilidad.
+              </p>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase mb-1 block">Razón (solo visible para ti)</label>
+              <input
+                type="text"
+                className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-400"
+                placeholder="Ej: Cita médica, viaje, etc."
+                value={blockDayModal.reason}
+                onChange={(e) => setBlockDayModal({ ...blockDayModal, reason: e.target.value })}
+              />
+            </div>
+
+            <div className="flex gap-2 mt-6">
+              <button
+                onClick={() => setBlockDayModal({ open: false, dateStr: '', reason: '' })}
+                className="flex-1 py-3 border border-slate-200 text-slate-600 rounded-xl font-medium hover:bg-slate-50 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={blockDay}
+                className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-medium hover:bg-slate-800 transition flex items-center justify-center gap-2"
+              >
+                <Lock className="w-4 h-4" /> Bloquear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Plan Modal */}
+      {confirmPlanModal.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <div className="bg-green-100 p-2 rounded-full">
+                  <CheckCheck className="w-5 h-5 text-green-600" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg">Confirmar plan</h3>
+                  <p className="text-xs text-slate-500">
+                    {new Date(confirmPlanModal.dateStr).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setConfirmPlanModal({ open: false, dateStr: '' })} className="p-1 hover:bg-slate-100 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4">
+              <p className="text-sm text-green-800 mb-2">
+                <CheckCircle className="w-4 h-4 inline mr-1" />
+                ¡Todos están disponibles este día!
+              </p>
+              <p className="text-xs text-green-700">
+                Al confirmar, tu disponibilidad será <strong>removida de otros grupos</strong> para este día.
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConfirmPlanModal({ open: false, dateStr: '' })}
+                className="flex-1 py-3 border border-slate-200 text-slate-600 rounded-xl font-medium hover:bg-slate-50 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmPlan}
+                className="flex-1 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition flex items-center justify-center gap-2"
+              >
+                <CheckCheck className="w-4 h-4" /> Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Conflict Modal */}
+      {conflictModal.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <div className="bg-amber-100 p-2 rounded-full">
+                  <AlertTriangle className="w-5 h-5 text-amber-600" />
+                </div>
+                <h3 className="font-bold text-lg">Conflicto de fecha</h3>
+              </div>
+              <button onClick={() => setConflictModal({ open: false, dateStr: '', conflicts: [], action: null })} className="p-1 hover:bg-slate-100 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+              {conflictModal.conflicts.map((conflict, idx) => (
+                <div key={idx} className="text-sm text-amber-800">
+                  {conflict.type === 'confirmed' && (
+                    <p>
+                      <CheckCheck className="w-4 h-4 inline mr-1" />
+                      Ya tienes un <strong>plan confirmado</strong> en "{conflict.groupName}" para este día.
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <p className="text-sm text-slate-600 mb-4">
+              ¿Deseas continuar de todos modos?
+            </p>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConflictModal({ open: false, dateStr: '', conflicts: [], action: null })}
+                className="flex-1 py-3 border border-slate-200 text-slate-600 rounded-xl font-medium hover:bg-slate-50 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  const dateStr = conflictModal.dateStr;
+                  setConflictModal({ open: false, dateStr: '', conflicts: [], action: null });
+                  toggleDateAvailability(dateStr, true); // Skip conflict check
+                }}
+                className="flex-1 py-3 bg-amber-500 text-white rounded-xl font-medium hover:bg-amber-600 transition"
+              >
+                Continuar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-md mx-auto px-4 mt-6 pb-32">
 
         {/* VIEW: LOGIN */}
@@ -1359,7 +1782,8 @@ export default function App() {
             {calendarViewMode === 'list' && (
               <div className="grid grid-cols-1 gap-3">
                 {filteredDays.map((day, idx) => {
-                  const { colorClass, statusIcon, isUserAvailable, voteCount, totalMembers, isStarred, starCount, hasMyMessage, messageCount } = getDayStatus(day.dateStr);
+                  const status = getDayStatus(day.dateStr);
+                  const { colorClass, statusIcon, isUserAvailable, voteCount, totalMembers, isStarred, starCount, hasMyMessage, messageCount, isBlocked, blockReason, isConfirmed, statusType, unreadCount } = status;
                   const isNewMonth = idx === 0 || filteredDays[idx - 1]?.monthKey !== day.monthKey;
 
                   return (
@@ -1375,65 +1799,141 @@ export default function App() {
                       )}
 
                       <div
-                        onClick={() => toggleDateAvailability(day.dateStr)}
+                        onClick={() => !isBlocked && toggleDateAvailability(day.dateStr)}
                         className={`
-                          relative overflow-hidden cursor-pointer transition-all duration-200
-                          rounded-xl border-2 p-4 flex items-center justify-between
-                          ${isUserAvailable ? 'border-indigo-600 bg-indigo-50' : 'border-transparent bg-white shadow-sm hover:shadow-md'}
+                          relative overflow-hidden transition-all duration-200
+                          rounded-xl border-2 p-4
+                          ${isBlocked ? 'border-slate-300 bg-slate-100 cursor-not-allowed' :
+                            isConfirmed ? 'border-green-500 bg-green-50 cursor-pointer' :
+                            isUserAvailable ? 'border-indigo-600 bg-indigo-50 cursor-pointer' :
+                            'border-transparent bg-white shadow-sm hover:shadow-md cursor-pointer'}
                         `}
                       >
-                        {isUserAvailable && (
+                        {/* Left indicator bar */}
+                        {isBlocked && (
+                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-slate-400"></div>
+                        )}
+                        {isConfirmed && (
+                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-green-500"></div>
+                        )}
+                        {isUserAvailable && !isConfirmed && !isBlocked && (
                           <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-600"></div>
                         )}
 
-                        <div className="flex items-center gap-4">
-                          <div className={`
-                            flex flex-col items-center justify-center w-12 h-12 rounded-lg
-                            ${isUserAvailable ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'}
-                          `}>
-                            <span className="text-[10px] uppercase font-bold">{day.monthName.substring(0, 3)}</span>
-                            <span className="text-lg font-bold leading-none">{day.dayNum}</span>
-                          </div>
-                          <div>
-                            <p className="font-semibold text-slate-700 capitalize">{day.dayName}</p>
-                            <div className="flex items-center gap-2">
-                              {isUserAvailable && (
-                                <span className="text-xs text-indigo-600 font-medium flex items-center gap-1">
-                                  <Check className="w-3 h-3" /> Disponible
-                                </span>
-                              )}
-                              {starCount > 0 && (
-                                <span className="text-xs text-yellow-600 flex items-center gap-0.5">
-                                  <Star className="w-3 h-3 fill-yellow-400" /> {starCount}
-                                </span>
-                              )}
-                              {messageCount > 0 && (
-                                <span className="text-xs text-slate-400 flex items-center gap-0.5">
-                                  <MessageCircle className="w-3 h-3" /> {messageCount}
-                                </span>
-                              )}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className={`
+                              flex flex-col items-center justify-center w-12 h-12 rounded-lg relative
+                              ${isBlocked ? 'bg-slate-300 text-slate-600' :
+                                isConfirmed ? 'bg-green-500 text-white' :
+                                isUserAvailable ? 'bg-indigo-600 text-white' :
+                                'bg-slate-100 text-slate-500'}
+                            `}>
+                              {isBlocked && <Lock className="w-4 h-4 absolute -top-1 -right-1 text-slate-600" />}
+                              {isConfirmed && <CheckCheck className="w-4 h-4 absolute -top-1 -right-1 text-green-600" />}
+                              <span className="text-[10px] uppercase font-bold">{day.monthName.substring(0, 3)}</span>
+                              <span className="text-lg font-bold leading-none">{day.dayNum}</span>
+                            </div>
+                            <div>
+                              <p className="font-semibold text-slate-700 capitalize">{day.dayName}</p>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {isBlocked && (
+                                  <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                                    <Lock className="w-3 h-3" /> Bloqueado {blockReason && `- ${blockReason}`}
+                                  </span>
+                                )}
+                                {isConfirmed && (
+                                  <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+                                    <CheckCheck className="w-3 h-3" /> Plan confirmado
+                                  </span>
+                                )}
+                                {!isBlocked && !isConfirmed && isUserAvailable && (
+                                  <span className="text-xs text-indigo-600 font-medium flex items-center gap-1">
+                                    <Check className="w-3 h-3" /> Disponible
+                                  </span>
+                                )}
+                                {starCount > 0 && (
+                                  <span className="text-xs text-yellow-600 flex items-center gap-0.5">
+                                    <Star className="w-3 h-3 fill-yellow-400" /> {starCount}
+                                  </span>
+                                )}
+                                {messageCount > 0 && (
+                                  <span className="text-xs text-slate-400 flex items-center gap-0.5">
+                                    <MessageCircle className="w-3 h-3" /> {messageCount}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={(e) => toggleStar(day.dateStr, e)}
-                            className={`p-2 rounded-full transition ${isStarred ? 'bg-yellow-100 text-yellow-600' : 'bg-slate-100 text-slate-400 hover:bg-yellow-50'}`}
-                            title="Marcar como favorito"
-                          >
-                            <Star className={`w-4 h-4 ${isStarred ? 'fill-yellow-400' : ''}`} />
-                          </button>
-                          <button
-                            onClick={(e) => openMessageModal(day.dateStr, e)}
-                            className={`p-2 rounded-full transition ${hasMyMessage ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400 hover:bg-indigo-50'}`}
-                            title="Agregar nota"
-                          >
-                            <MessageCircle className={`w-4 h-4 ${hasMyMessage ? 'fill-indigo-200' : ''}`} />
-                          </button>
-                          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold ${colorClass}`}>
-                            {statusIcon}
-                            <span>{voteCount}/{totalMembers}</span>
+                          <div className="flex items-center gap-1">
+                            {/* Block/Unblock button */}
+                            {isBlocked ? (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); unblockDay(day.dateStr); }}
+                                className="p-2 rounded-full bg-slate-200 text-slate-500 hover:bg-slate-300 transition"
+                                title="Desbloquear día"
+                              >
+                                <Lock className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={(e) => openBlockDayModal(day.dateStr, e)}
+                                className="p-2 rounded-full bg-slate-100 text-slate-400 hover:bg-slate-200 transition"
+                                title="Bloquear día"
+                              >
+                                <Ban className="w-4 h-4" />
+                              </button>
+                            )}
+
+                            {/* Confirm plan button - only show on green days */}
+                            {!isBlocked && statusType === 'green' && !isConfirmed && (
+                              <button
+                                onClick={(e) => openConfirmPlanModal(day.dateStr, e)}
+                                className="p-2 rounded-full bg-green-100 text-green-600 hover:bg-green-200 transition"
+                                title="Confirmar plan"
+                              >
+                                <CheckCheck className="w-4 h-4" />
+                              </button>
+                            )}
+
+                            {/* Cancel confirmed plan */}
+                            {isConfirmed && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); cancelConfirmedPlan(day.dateStr); }}
+                                className="p-2 rounded-full bg-green-200 text-green-700 hover:bg-green-300 transition"
+                                title="Cancelar plan"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            )}
+
+                            <button
+                              onClick={(e) => toggleStar(day.dateStr, e)}
+                              className={`p-2 rounded-full transition ${isStarred ? 'bg-yellow-100 text-yellow-600' : 'bg-slate-100 text-slate-400 hover:bg-yellow-50'}`}
+                              title="Marcar como favorito"
+                            >
+                              <Star className={`w-4 h-4 ${isStarred ? 'fill-yellow-400' : ''}`} />
+                            </button>
+
+                            {/* Message button with unread badge */}
+                            <button
+                              onClick={(e) => openMessageModal(day.dateStr, e)}
+                              className={`p-2 rounded-full transition relative ${hasMyMessage ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400 hover:bg-indigo-50'}`}
+                              title="Ver/Agregar nota"
+                            >
+                              <MessageCircle className={`w-4 h-4 ${hasMyMessage ? 'fill-indigo-200' : ''}`} />
+                              {unreadCount > 0 && (
+                                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                                  {unreadCount > 9 ? '9+' : unreadCount}
+                                </span>
+                              )}
+                            </button>
+
+                            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold ${colorClass}`}>
+                              {statusIcon}
+                              <span>{voteCount}/{totalMembers}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
