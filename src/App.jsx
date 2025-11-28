@@ -109,8 +109,8 @@ export default function App() {
   // Estados para secciones colapsables de la página principal
   const [sectionExpanded, setSectionExpanded] = useState({
     calendar: false,
-    groups: true,
-    newGroup: false
+    groups: false,
+    newGroup: true
   });
 
   const monthRefs = useRef({});
@@ -1712,7 +1712,76 @@ export default function App() {
               </div>
             )}
 
-            {/* ========== SECCIÓN 1: MIS GRUPOS ========== */}
+            {/* ========== SECCIÓN 1: CREAR O UNIRSE A GRUPO ========== */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <button
+                onClick={() => setSectionExpanded(prev => ({ ...prev, newGroup: !prev.newGroup }))}
+                className="w-full p-4 flex items-center justify-between hover:bg-slate-50 transition"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="bg-green-100 p-2 rounded-xl">
+                    <Plus className="w-5 h-5 text-green-600" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="font-semibold text-slate-800">Crear o unirse a un grupo</h3>
+                    <p className="text-xs text-slate-500">Empieza aquí para coordinar fechas</p>
+                  </div>
+                </div>
+                {sectionExpanded.newGroup ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+              </button>
+
+              {sectionExpanded.newGroup && (
+                <div className="border-t border-slate-100 p-4 space-y-4">
+                  {/* Crear nuevo grupo */}
+                  <div>
+                    <button
+                      onClick={openCreateGroupModal}
+                      className="w-full p-4 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-xl flex items-center justify-center gap-3 hover:from-indigo-600 hover:to-indigo-700 transition shadow-md"
+                    >
+                      <Plus className="w-5 h-5" />
+                      <span className="font-semibold">Crear nuevo grupo</span>
+                    </button>
+                    <p className="text-[11px] text-slate-400 text-center mt-2">
+                      Crea un grupo y comparte el código con tus amigos
+                    </p>
+                  </div>
+
+                  {/* Separador */}
+                  <div className="relative flex items-center">
+                    <div className="flex-grow border-t border-slate-200"></div>
+                    <span className="flex-shrink mx-3 text-xs text-slate-400">o</span>
+                    <div className="flex-grow border-t border-slate-200"></div>
+                  </div>
+
+                  {/* Unirse con código */}
+                  <div>
+                    <label className="text-xs font-medium text-slate-600 mb-1.5 block">Unirse con código</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Ej: X7Y2Z"
+                        className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none uppercase font-mono text-slate-700 focus:border-indigo-300 transition"
+                        value={groupIdInput}
+                        onChange={(e) => setGroupIdInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && joinGroup(groupIdInput)}
+                      />
+                      <button
+                        onClick={() => joinGroup(groupIdInput)}
+                        disabled={!groupIdInput.trim()}
+                        className={`px-5 rounded-xl font-medium transition ${groupIdInput.trim() ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+                      >
+                        Unirse
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-2">
+                      Pide el código a quien creó el grupo
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ========== SECCIÓN 2: MIS GRUPOS ========== */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
               <button
                 onClick={() => setSectionExpanded(prev => ({ ...prev, groups: !prev.groups }))}
@@ -1809,75 +1878,6 @@ export default function App() {
                         ));
                       })()
                     )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* ========== SECCIÓN 2: CREAR O UNIRSE A GRUPO ========== */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <button
-                onClick={() => setSectionExpanded(prev => ({ ...prev, newGroup: !prev.newGroup }))}
-                className="w-full p-4 flex items-center justify-between hover:bg-slate-50 transition"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="bg-green-100 p-2 rounded-xl">
-                    <Plus className="w-5 h-5 text-green-600" />
-                  </div>
-                  <div className="text-left">
-                    <h3 className="font-semibold text-slate-800">Crear o unirse a un grupo</h3>
-                    <p className="text-xs text-slate-500">Nuevo grupo o ingresa un código</p>
-                  </div>
-                </div>
-                {sectionExpanded.newGroup ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-              </button>
-
-              {sectionExpanded.newGroup && (
-                <div className="border-t border-slate-100 p-4 space-y-4">
-                  {/* Crear nuevo grupo */}
-                  <div>
-                    <button
-                      onClick={openCreateGroupModal}
-                      className="w-full p-4 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-xl flex items-center justify-center gap-3 hover:from-indigo-600 hover:to-indigo-700 transition shadow-md"
-                    >
-                      <Plus className="w-5 h-5" />
-                      <span className="font-semibold">Crear nuevo grupo</span>
-                    </button>
-                    <p className="text-[11px] text-slate-400 text-center mt-2">
-                      Crea un grupo y comparte el código con tus amigos
-                    </p>
-                  </div>
-
-                  {/* Separador */}
-                  <div className="relative flex items-center">
-                    <div className="flex-grow border-t border-slate-200"></div>
-                    <span className="flex-shrink mx-3 text-xs text-slate-400">o</span>
-                    <div className="flex-grow border-t border-slate-200"></div>
-                  </div>
-
-                  {/* Unirse con código */}
-                  <div>
-                    <label className="text-xs font-medium text-slate-600 mb-1.5 block">Unirse con código</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="Ej: X7Y2Z"
-                        className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none uppercase font-mono text-slate-700 focus:border-indigo-300 transition"
-                        value={groupIdInput}
-                        onChange={(e) => setGroupIdInput(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && joinGroup(groupIdInput)}
-                      />
-                      <button
-                        onClick={() => joinGroup(groupIdInput)}
-                        disabled={!groupIdInput.trim()}
-                        className={`px-5 rounded-xl font-medium transition ${groupIdInput.trim() ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
-                      >
-                        Unirse
-                      </button>
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-2">
-                      Pide el código a quien creó el grupo
-                    </p>
                   </div>
                 </div>
               )}
