@@ -106,6 +106,13 @@ export default function App() {
   const [groupMenuOpen, setGroupMenuOpen] = useState(null); // ID del grupo con menú abierto
   const [deleteGroupModal, setDeleteGroupModal] = useState({ open: false, groupId: '', groupName: '' });
 
+  // Estados para secciones colapsables de la página principal
+  const [sectionExpanded, setSectionExpanded] = useState({
+    calendar: false,
+    groups: true,
+    newGroup: false
+  });
+
   const monthRefs = useRef({});
 
   // Cerrar menú de grupo al hacer clic fuera
@@ -1677,25 +1684,228 @@ export default function App() {
 
         {/* VIEW: JOIN/CREATE */}
         {view === 'join' && (
-          <div className="space-y-4">
-            <div className="text-center mb-4">
-              <h2 className="text-2xl font-bold text-slate-800">¡Hola, {user?.displayName?.split(' ')[0]}!</h2>
-              <p className="text-slate-500">Tu panel de disponibilidad personal</p>
+          <div className="space-y-3">
+            {/* Bienvenida y guía inicial */}
+            <div className="text-center mb-2">
+              <h2 className="text-xl font-bold text-slate-800">¡Hola, {user?.displayName?.split(' ')[0]}!</h2>
+              <p className="text-sm text-slate-500">Coordina fechas con tus amigos fácilmente</p>
             </div>
 
-            {/* ========== CALENDARIO MAESTRO ========== */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                  <CalendarX className="w-5 h-5 text-indigo-600" />
-                  Mi disponibilidad
-                </h3>
-                <span className="text-xs text-slate-400">Próximos 30 días</span>
+            {/* Guía rápida para nuevos usuarios */}
+            {userGroups.length === 0 && (
+              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-2">
+                <h3 className="font-semibold text-indigo-800 text-sm mb-2">¿Cómo funciona?</h3>
+                <ol className="text-xs text-indigo-700 space-y-1.5">
+                  <li className="flex items-start gap-2">
+                    <span className="bg-indigo-200 text-indigo-800 rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0 font-bold text-[10px]">1</span>
+                    <span><strong>Crea un grupo</strong> o únete con un código que te compartan</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="bg-indigo-200 text-indigo-800 rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0 font-bold text-[10px]">2</span>
+                    <span><strong>Marca los días</strong> en que estás disponible</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="bg-indigo-200 text-indigo-800 rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0 font-bold text-[10px]">3</span>
+                    <span><strong>Encuentra el día perfecto</strong> cuando todos coincidan</span>
+                  </li>
+                </ol>
               </div>
+            )}
 
-              <p className="text-xs text-slate-500 mb-3">
-                Bloquea días o confirma planes. Se reflejarán en todos tus grupos.
-              </p>
+            {/* ========== SECCIÓN 1: MIS GRUPOS ========== */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <button
+                onClick={() => setSectionExpanded(prev => ({ ...prev, groups: !prev.groups }))}
+                className="w-full p-4 flex items-center justify-between hover:bg-slate-50 transition"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="bg-indigo-100 p-2 rounded-xl">
+                    <Users className="w-5 h-5 text-indigo-600" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="font-semibold text-slate-800">Mis grupos</h3>
+                    <p className="text-xs text-slate-500">
+                      {userGroups.length === 0 ? 'Aún no tienes grupos' : `${userGroups.length} grupo${userGroups.length !== 1 ? 's' : ''}`}
+                    </p>
+                  </div>
+                </div>
+                {sectionExpanded.groups ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+              </button>
+
+              {sectionExpanded.groups && (
+                <div className="border-t border-slate-100">
+                  {/* Barra de búsqueda si hay grupos */}
+                  {userGroups.length > 0 && (
+                    <div className="p-3 bg-slate-50">
+                      <div className="relative">
+                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                          type="text"
+                          placeholder="Buscar grupo..."
+                          value={groupSearch}
+                          onChange={(e) => setGroupSearch(e.target.value)}
+                          className="w-full pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-300 transition"
+                        />
+                        {groupSearch && (
+                          <button onClick={() => setGroupSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Lista de grupos */}
+                  <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
+                    {userGroups.length === 0 ? (
+                      <div className="p-6 text-center">
+                        <Users className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                        <p className="text-sm text-slate-500 mb-1">No tienes grupos todavía</p>
+                        <p className="text-xs text-slate-400">Crea uno nuevo o únete con un código</p>
+                      </div>
+                    ) : (
+                      (() => {
+                        const filteredGroups = userGroups.filter(group => {
+                          if (!groupSearch) return true;
+                          const search = groupSearch.toLowerCase();
+                          return (group.name || '').toLowerCase().includes(search) || group.id.toLowerCase().includes(search);
+                        });
+
+                        if (filteredGroups.length === 0) {
+                          return (
+                            <div className="p-4 text-center text-slate-400">
+                              <p className="text-sm">No se encontraron grupos</p>
+                            </div>
+                          );
+                        }
+
+                        return filteredGroups.map((group) => (
+                          <div key={group.id} className="flex items-center gap-3 p-3 hover:bg-slate-50 transition">
+                            <button
+                              onClick={() => { setGroupId(group.id); setView('calendar'); }}
+                              className="flex-1 flex items-center gap-3 text-left min-w-0"
+                            >
+                              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center flex-shrink-0">
+                                <span className="text-white font-bold text-sm">{(group.name || group.id).charAt(0).toUpperCase()}</span>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-medium text-slate-800 truncate text-sm">{group.name || `Grupo ${group.id}`}</h4>
+                                <div className="flex items-center gap-2 text-xs text-slate-400">
+                                  <span className="font-mono">{group.id}</span>
+                                  <span>•</span>
+                                  <span>{group.memberCount} miembro{group.memberCount !== 1 ? 's' : ''}</span>
+                                </div>
+                              </div>
+                              <ChevronRight className="w-4 h-4 text-slate-300" />
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setDeleteGroupModal({ open: true, groupId: group.id, groupName: group.name || `Grupo ${group.id}` }); }}
+                              className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                              title="Salir del grupo"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ));
+                      })()
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ========== SECCIÓN 2: CREAR O UNIRSE A GRUPO ========== */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <button
+                onClick={() => setSectionExpanded(prev => ({ ...prev, newGroup: !prev.newGroup }))}
+                className="w-full p-4 flex items-center justify-between hover:bg-slate-50 transition"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="bg-green-100 p-2 rounded-xl">
+                    <Plus className="w-5 h-5 text-green-600" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="font-semibold text-slate-800">Crear o unirse a un grupo</h3>
+                    <p className="text-xs text-slate-500">Nuevo grupo o ingresa un código</p>
+                  </div>
+                </div>
+                {sectionExpanded.newGroup ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+              </button>
+
+              {sectionExpanded.newGroup && (
+                <div className="border-t border-slate-100 p-4 space-y-4">
+                  {/* Crear nuevo grupo */}
+                  <div>
+                    <button
+                      onClick={openCreateGroupModal}
+                      className="w-full p-4 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-xl flex items-center justify-center gap-3 hover:from-indigo-600 hover:to-indigo-700 transition shadow-md"
+                    >
+                      <Plus className="w-5 h-5" />
+                      <span className="font-semibold">Crear nuevo grupo</span>
+                    </button>
+                    <p className="text-[11px] text-slate-400 text-center mt-2">
+                      Crea un grupo y comparte el código con tus amigos
+                    </p>
+                  </div>
+
+                  {/* Separador */}
+                  <div className="relative flex items-center">
+                    <div className="flex-grow border-t border-slate-200"></div>
+                    <span className="flex-shrink mx-3 text-xs text-slate-400">o</span>
+                    <div className="flex-grow border-t border-slate-200"></div>
+                  </div>
+
+                  {/* Unirse con código */}
+                  <div>
+                    <label className="text-xs font-medium text-slate-600 mb-1.5 block">Unirse con código</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Ej: X7Y2Z"
+                        className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none uppercase font-mono text-slate-700 focus:border-indigo-300 transition"
+                        value={groupIdInput}
+                        onChange={(e) => setGroupIdInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && joinGroup(groupIdInput)}
+                      />
+                      <button
+                        onClick={() => joinGroup(groupIdInput)}
+                        disabled={!groupIdInput.trim()}
+                        className={`px-5 rounded-xl font-medium transition ${groupIdInput.trim() ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+                      >
+                        Unirse
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-2">
+                      Pide el código a quien creó el grupo
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ========== SECCIÓN 3: MI CALENDARIO PERSONAL ========== */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <button
+                onClick={() => setSectionExpanded(prev => ({ ...prev, calendar: !prev.calendar }))}
+                className="w-full p-4 flex items-center justify-between hover:bg-slate-50 transition"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="bg-amber-100 p-2 rounded-xl">
+                    <CalendarX className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="font-semibold text-slate-800">Mi calendario personal</h3>
+                    <p className="text-xs text-slate-500">Bloquea días en todos tus grupos</p>
+                  </div>
+                </div>
+                {sectionExpanded.calendar ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+              </button>
+
+              {sectionExpanded.calendar && (
+                <div className="border-t border-slate-100 p-4">
+                  <p className="text-xs text-slate-500 mb-3">
+                    Toca un día para marcarlo como no disponible. Se actualizará en todos tus grupos.
+                  </p>
 
               {/* Mini calendario de 30 días */}
               <div className="grid grid-cols-7 gap-1 mb-3">
@@ -1857,202 +2067,8 @@ export default function App() {
                   })}
                 </div>
               )}
-            </div>
-
-            {/* ========== SECCIÓN DE GRUPOS ========== */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              {/* Header de grupos con controles */}
-              <div className="p-3 border-b border-slate-100">
-                <div className="flex items-center justify-between mb-2">
-                  <button
-                    onClick={() => setGroupsCollapsed(!groupsCollapsed)}
-                    className="flex items-center gap-2 text-slate-700 font-semibold hover:text-indigo-600 transition"
-                  >
-                    <Users className="w-4 h-4" />
-                    <span>Mis grupos ({userGroups.length})</span>
-                    {groupsCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-                  </button>
-                </div>
-
-                {/* Barra de búsqueda - solo si hay grupos y no está colapsado */}
-                {!groupsCollapsed && userGroups.length > 0 && (
-                  <div className="relative">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Buscar grupo..."
-                      value={groupSearch}
-                      onChange={(e) => setGroupSearch(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition"
-                    />
-                    {groupSearch && (
-                      <button
-                        onClick={() => setGroupSearch('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Lista de grupos */}
-              {!groupsCollapsed && (
-                <div className="divide-y divide-slate-100">
-                  {userGroups.length === 0 ? (
-                    <div className="p-6 text-center text-slate-400">
-                      <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No tienes grupos aún</p>
-                    </div>
-                  ) : (
-                    (() => {
-                      const filteredGroups = userGroups.filter(group => {
-                        if (!groupSearch) return true;
-                        const search = groupSearch.toLowerCase();
-                        return (
-                          (group.name || '').toLowerCase().includes(search) ||
-                          (group.description || '').toLowerCase().includes(search) ||
-                          group.id.toLowerCase().includes(search)
-                        );
-                      });
-
-                      if (filteredGroups.length === 0) {
-                        return (
-                          <div className="p-6 text-center text-slate-400">
-                            <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                            <p className="text-sm">No se encontraron grupos</p>
-                          </div>
-                        );
-                      }
-
-                      return filteredGroups.map((group) => (
-                        <div
-                          key={group.id}
-                          className="relative flex items-center gap-3 p-3 hover:bg-slate-50 transition"
-                        >
-                          {/* Contenido clickeable del grupo */}
-                          <button
-                            onClick={() => {
-                              setGroupId(group.id);
-                              setView('calendar');
-                              setGroupMenuOpen(null);
-                            }}
-                            className="flex-1 flex items-center gap-3 text-left min-w-0"
-                          >
-                            {/* Avatar del grupo */}
-                            <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0">
-                              <span className="text-indigo-600 font-bold text-sm">
-                                {(group.name || group.id).charAt(0).toUpperCase()}
-                              </span>
-                            </div>
-
-                            {/* Info del grupo */}
-                            <div className="flex-1 min-w-0">
-                              <h4 className="font-medium text-slate-800 truncate text-sm">
-                                {group.name || `Grupo ${group.id}`}
-                              </h4>
-                              <div className="flex items-center gap-2 text-xs text-slate-400">
-                                <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">{group.id}</span>
-                                <span>·</span>
-                                <span>{group.memberCount} miembro{group.memberCount !== 1 ? 's' : ''}</span>
-                              </div>
-                            </div>
-
-                            {/* Avatares mini */}
-                            <div className="hidden sm:flex -space-x-1.5 flex-shrink-0">
-                              {group.members.slice(0, 3).map((m, idx) => (
-                                m.photoURL ? (
-                                  <img key={idx} src={m.photoURL} alt={m.name} className="w-5 h-5 rounded-full border border-white" />
-                                ) : (
-                                  <div key={idx} className="w-5 h-5 rounded-full bg-indigo-400 border border-white flex items-center justify-center text-white text-[8px] font-medium">
-                                    {m.name?.charAt(0)}
-                                  </div>
-                                )
-                              ))}
-                            </div>
-                          </button>
-
-                          {/* Botón de menú */}
-                          <div className="relative flex-shrink-0" data-group-menu>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setGroupMenuOpen(groupMenuOpen === group.id ? null : group.id);
-                              }}
-                              className="p-2 rounded-lg hover:bg-slate-200 transition text-slate-400 hover:text-slate-600"
-                            >
-                              <MoreVertical className="w-4 h-4" />
-                            </button>
-
-                            {/* Menú desplegable */}
-                            {groupMenuOpen === group.id && (
-                              <div className="absolute right-0 top-full mt-1 bg-white rounded-xl shadow-lg border border-slate-200 py-1 z-10 min-w-[160px]">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setGroupId(group.id);
-                                    setView('calendar');
-                                    setGroupMenuOpen(null);
-                                  }}
-                                  className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                                >
-                                  <Calendar className="w-4 h-4" />
-                                  Abrir calendario
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setDeleteGroupModal({ open: true, groupId: group.id, groupName: group.name || `Grupo ${group.id}` });
-                                    setGroupMenuOpen(null);
-                                  }}
-                                  className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                  Salir del grupo
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ));
-                    })()
-                  )}
                 </div>
               )}
-            </div>
-
-            <button
-              onClick={openCreateGroupModal}
-              className="w-full py-5 bg-white border-2 border-dashed border-indigo-200 rounded-2xl flex flex-col items-center justify-center gap-2 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-300 transition group"
-            >
-              <div className="bg-indigo-100 p-3 rounded-full group-hover:bg-indigo-200 transition">
-                <Plus className="w-6 h-6" />
-              </div>
-              <span className="font-semibold">Crear Nuevo Grupo</span>
-            </button>
-
-            <div className="relative flex py-2 items-center">
-              <div className="flex-grow border-t border-slate-200"></div>
-              <span className="flex-shrink mx-4 text-slate-400 text-sm">O ingresa un código</span>
-              <div className="flex-grow border-t border-slate-200"></div>
-            </div>
-
-            <div className="bg-white p-2 rounded-2xl shadow-sm border border-slate-100 flex gap-2">
-              <input
-                type="text"
-                placeholder="CÓDIGO (ej. X7Y2Z)"
-                className="flex-1 p-3 bg-transparent outline-none uppercase font-mono text-slate-700"
-                value={groupIdInput}
-                onChange={(e) => setGroupIdInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && joinGroup(groupIdInput)}
-              />
-              <button
-                onClick={() => joinGroup(groupIdInput)}
-                className="bg-indigo-600 text-white px-6 rounded-xl font-medium hover:bg-indigo-700 transition"
-              >
-                Unirse
-              </button>
             </div>
           </div>
         )}
