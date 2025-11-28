@@ -1691,26 +1691,24 @@ export default function App() {
               <p className="text-sm text-slate-500">Coordina fechas con tus amigos fácilmente</p>
             </div>
 
-            {/* Guía rápida para nuevos usuarios */}
-            {userGroups.length === 0 && (
-              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-2">
-                <h3 className="font-semibold text-indigo-800 text-sm mb-2">¿Cómo funciona?</h3>
-                <ol className="text-xs text-indigo-700 space-y-1.5">
-                  <li className="flex items-start gap-2">
-                    <span className="bg-indigo-200 text-indigo-800 rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0 font-bold text-[10px]">1</span>
-                    <span><strong>Crea un grupo</strong> o únete con un código que te compartan</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="bg-indigo-200 text-indigo-800 rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0 font-bold text-[10px]">2</span>
-                    <span><strong>Marca los días</strong> en que estás disponible</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="bg-indigo-200 text-indigo-800 rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0 font-bold text-[10px]">3</span>
-                    <span><strong>Encuentra el día perfecto</strong> cuando todos coincidan</span>
-                  </li>
-                </ol>
-              </div>
-            )}
+            {/* Guía rápida - siempre visible */}
+            <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-2">
+              <h3 className="font-semibold text-indigo-800 text-sm mb-2">¿Cómo funciona?</h3>
+              <ol className="text-xs text-indigo-700 space-y-1.5">
+                <li className="flex items-start gap-2">
+                  <span className="bg-indigo-200 text-indigo-800 rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0 font-bold text-[10px]">1</span>
+                  <span><strong>Crea un grupo</strong> o únete con un código que te compartan</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="bg-indigo-200 text-indigo-800 rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0 font-bold text-[10px]">2</span>
+                  <span><strong>Marca los días</strong> en que estás disponible</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="bg-indigo-200 text-indigo-800 rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0 font-bold text-[10px]">3</span>
+                  <span><strong>Encuentra el día perfecto</strong> cuando todos coincidan</span>
+                </li>
+              </ol>
+            </div>
 
             {/* ========== SECCIÓN 1: CREAR O UNIRSE A GRUPO ========== */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
