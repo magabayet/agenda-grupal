@@ -68,12 +68,12 @@ import {
 
 // --- Configuración de Firebase ---
 const firebaseConfig = {
-  apiKey: "AIzaSyBp7MyOW6BL9TDnvZolQyMbWUtKH_nmFAQ",
-  authDomain: "planificador-grupal.firebaseapp.com",
-  projectId: "planificador-grupal",
-  storageBucket: "planificador-grupal.firebasestorage.app",
-  messagingSenderId: "1014010017764",
-  appId: "1:1014010017764:web:221462ca5685cb63df39f1"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 const app = initializeApp(firebaseConfig);
@@ -92,7 +92,7 @@ if (typeof window !== 'undefined' && 'Notification' in window && 'serviceWorker'
 }
 
 // VAPID Key para FCM (se obtiene de Firebase Console > Project Settings > Cloud Messaging)
-const VAPID_KEY = 'BJChru6AzqyaZ9wZAuL7EiFpoxy_U1khFY7Y9_fHiiBrkkrB0NUrAnpxJLO26ISw4iY0YYfII6VDaamMiS_ieGY';
+const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY;
 
 export default function App() {
   const [user, setUser] = useState(null);
