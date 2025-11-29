@@ -17,6 +17,7 @@ import {
   arrayUnion,
   deleteField
 } from 'firebase/firestore';
+import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import {
   Calendar,
   Users,
@@ -56,7 +57,13 @@ import {
   Trash2,
   MoreVertical,
   Eye,
-  EyeOff
+  EyeOff,
+  HelpCircle,
+  Info,
+  BellRing,
+  BellOff,
+  Download,
+  Smartphone
 } from 'lucide-react';
 
 // --- Configuración de Firebase ---
@@ -74,6 +81,19 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
+// Firebase Cloud Messaging - inicializar solo si el navegador lo soporta
+let messaging = null;
+if (typeof window !== 'undefined' && 'Notification' in window && 'serviceWorker' in navigator) {
+  try {
+    messaging = getMessaging(app);
+  } catch (e) {
+    console.log('FCM no disponible:', e);
+  }
+}
+
+// VAPID Key para FCM (se obtiene de Firebase Console > Project Settings > Cloud Messaging)
+const VAPID_KEY = 'BJChru6AzqyaZ9wZAuL7EiFpoxy_U1khFY7Y9_fHiiBrkkrB0NUrAnpxJLO26ISw4iY0YYfII6VDaamMiS_ieGY';
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [userGroups, setUserGroups] = useState([]);
@@ -85,6 +105,7 @@ export default function App() {
   const [notification, setNotification] = useState('');
   const [filter, setFilter] = useState('all'); // all, available, starred, green, yellow, red
   const [messageModal, setMessageModal] = useState({ open: false, dateStr: '', message: '' });
+  const [generalChatModal, setGeneralChatModal] = useState({ open: false, message: '' });
   const [createGroupModal, setCreateGroupModal] = useState({ open: false, name: '', description: '', emails: '' });
   const [editGroupModal, setEditGroupModal] = useState({ open: false, name: '', description: '' });
   const [inviteModal, setInviteModal] = useState({ open: false, emails: '' });
@@ -99,6 +120,7 @@ export default function App() {
   const [conflictModal, setConflictModal] = useState({ open: false, dateStr: '', conflicts: [], action: null });
   const [confirmPlanModal, setConfirmPlanModal] = useState({ open: false, dateStr: '' });
   const [expandedConfirmed, setExpandedConfirmed] = useState(null); // dateStr del día que tiene el desplegable de confirmados abierto
+  const [showGroupInstructions, setShowGroupInstructions] = useState(true); // Mostrar instrucciones de uso del grupo
 
   // Estados para gestión de grupos en página principal
   const [groupsCollapsed, setGroupsCollapsed] = useState(false);
@@ -111,6 +133,28 @@ export default function App() {
     calendar: false,
     groups: false,
     newGroup: true
+  });
+
+  // Estado para el mes seleccionado en el calendario personal
+  const [personalCalendarMonth, setPersonalCalendarMonth] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
+
+  // Estados para notificaciones push
+  const [notificationPermission, setNotificationPermission] = useState('default');
+  const [fcmToken, setFcmToken] = useState(null);
+
+  // Estados para PWA install prompt
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [showInstallPrompt, setShowInstallPrompt] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [showIOSInstallModal, setShowIOSInstallModal] = useState(false);
+  const [installPromptDismissed, setInstallPromptDismissed] = useState(() => {
+    // Para iOS no guardamos el dismiss porque no hay forma de detectar instalación
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isIOS) return false;
+    return localStorage.getItem('installPromptDismissed') === 'true';
   });
 
   const monthRefs = useRef({});
@@ -159,6 +203,164 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
+  // Inicializar notificaciones push
+  useEffect(() => {
+    // Verificar el estado actual de permisos
+    if ('Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
+
+    // Escuchar mensajes en primer plano
+    if (messaging) {
+      const unsubscribe = onMessage(messaging, (payload) => {
+        console.log('Mensaje recibido en primer plano:', payload);
+
+        // Mostrar notificación en la app
+        const title = payload.notification?.title || 'Nuevo mensaje';
+        const body = payload.notification?.body || '';
+        showNotification(`${title}: ${body}`);
+      });
+
+      return () => unsubscribe();
+    }
+
+    // Para iOS: limpiar el dismiss del prompt para que siempre pueda ver las instrucciones
+    const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isiOS) {
+      localStorage.removeItem('installPromptDismissed');
+    }
+  }, []);
+
+  // PWA Install Prompt
+  useEffect(() => {
+    // Detectar si ya está instalada como app
+    const checkStandalone = () => {
+      const isInStandaloneMode = window.matchMedia('(display-mode: standalone)').matches
+        || window.navigator.standalone === true
+        || document.referrer.includes('android-app://');
+      setIsStandalone(isInStandaloneMode);
+      return isInStandaloneMode;
+    };
+
+    const standalone = checkStandalone();
+
+    // Capturar el evento beforeinstallprompt (Chrome/Android)
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      // Mostrar el prompt solo si no fue descartado y no está en modo standalone
+      if (!installPromptDismissed && !standalone) {
+        setTimeout(() => setShowInstallPrompt(true), 3000);
+      }
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    // Para iOS: mostrar instrucciones después de un delay si no está instalado
+    const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isiOS && !standalone && !installPromptDismissed) {
+      setTimeout(() => setShowInstallPrompt(true), 3000);
+    }
+
+    // Detectar cuando la app es instalada
+    const handleAppInstalled = () => {
+      setDeferredPrompt(null);
+      setShowInstallPrompt(false);
+      setIsStandalone(true);
+      showNotification('App instalada correctamente');
+    };
+
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, [installPromptDismissed]);
+
+  // Función para solicitar permiso de notificaciones
+  const requestNotificationPermission = async () => {
+    if (!messaging) {
+      showNotification('Las notificaciones no están disponibles en este navegador');
+      return;
+    }
+
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+
+      if (permission === 'granted') {
+        // Obtener el token FCM
+        const token = await getToken(messaging, { vapidKey: VAPID_KEY });
+        setFcmToken(token);
+
+        // Guardar el token en Firestore para este usuario
+        if (user && token) {
+          const userRef = doc(db, 'users', user.uid);
+          await updateDoc(userRef, {
+            fcmTokens: arrayUnion(token),
+            notificationsEnabled: true
+          });
+          showNotification('Notificaciones activadas');
+        }
+      } else {
+        showNotification('Permiso de notificaciones denegado');
+      }
+    } catch (error) {
+      console.error('Error al solicitar permiso:', error);
+      showNotification('Error al activar notificaciones');
+    }
+  };
+
+  // Función para desactivar notificaciones
+  const disableNotifications = async () => {
+    if (user && fcmToken) {
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        // Obtener tokens actuales y remover el actual
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const currentTokens = userSnap.data().fcmTokens || [];
+          const newTokens = currentTokens.filter(t => t !== fcmToken);
+          await updateDoc(userRef, {
+            fcmTokens: newTokens,
+            notificationsEnabled: false
+          });
+        }
+        setFcmToken(null);
+        showNotification('Notificaciones desactivadas');
+      } catch (error) {
+        console.error('Error al desactivar notificaciones:', error);
+      }
+    }
+  };
+
+  // Función para instalar la PWA
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+
+    if (outcome === 'accepted') {
+      console.log('PWA instalada');
+    }
+    setDeferredPrompt(null);
+    setShowInstallPrompt(false);
+  };
+
+  // Función para descartar el prompt de instalación
+  const dismissInstallPrompt = () => {
+    setShowInstallPrompt(false);
+    setInstallPromptDismissed(true);
+    localStorage.setItem('installPromptDismissed', 'true');
+  };
+
+  // Función para detectar si es iOS
+  const isIOS = () => {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  };
+
   // Cargar grupos del usuario
   const loadUserGroups = async (uid) => {
     try {
@@ -182,7 +384,9 @@ export default function App() {
                   name: data.name || '',
                   description: data.description || '',
                   memberCount: data.members?.length || 0,
-                  members: data.members || []
+                  members: data.members || [],
+                  generalChat: data.generalChat || [],
+                  messages: data.messages || {}
                 };
               }
               return null;
@@ -663,6 +867,56 @@ export default function App() {
     return Math.max(0, totalMessages - seenCount);
   };
 
+  // --- Marcar mensajes del chat general como leídos ---
+  const markGeneralChatAsRead = async (messageCount) => {
+    if (!user || !groupId || messageCount === 0) return;
+
+    const userRef = doc(db, 'users', user.uid);
+
+    try {
+      await updateDoc(userRef, {
+        [`lastSeenMessages.${groupId}._general`]: messageCount
+      });
+    } catch (e) {
+      console.error("Error al marcar chat general como leído", e);
+    }
+  };
+
+  // Función helper para contar mensajes sin leer del chat general
+  const getUnreadGeneralChatCount = () => {
+    const totalMessages = groupData?.generalChat?.length || 0;
+    const seenCount = userData?.lastSeenMessages?.[groupId]?.['_general'] || 0;
+    return Math.max(0, totalMessages - seenCount);
+  };
+
+  // Función para contar TODOS los mensajes sin leer de un grupo (chat general + chats de días)
+  const getTotalUnreadForGroup = (group) => {
+    if (!userData?.lastSeenMessages) return 0;
+
+    const groupSeenData = userData.lastSeenMessages[group.id] || {};
+    let totalUnread = 0;
+
+    // Mensajes sin leer del chat general
+    const generalChatTotal = group.generalChat?.length || 0;
+    const generalChatSeen = groupSeenData['_general'] || 0;
+    totalUnread += Math.max(0, generalChatTotal - generalChatSeen);
+
+    // Mensajes sin leer de los chats de días
+    const messages = group.messages || {};
+    Object.entries(messages).forEach(([dateStr, dateMessages]) => {
+      let msgCount = 0;
+      if (Array.isArray(dateMessages)) {
+        msgCount = dateMessages.length;
+      } else if (dateMessages && typeof dateMessages === 'object') {
+        msgCount = Object.keys(dateMessages).length;
+      }
+      const seenCount = groupSeenData[dateStr] || 0;
+      totalUnread += Math.max(0, msgCount - seenCount);
+    });
+
+    return totalUnread;
+  };
+
   const toggleStar = async (dateStr, e) => {
     e.stopPropagation();
     if (!user || !groupId || !groupData) return;
@@ -749,8 +1003,47 @@ export default function App() {
       });
       // Limpiar el campo de mensaje, mantener el modal abierto
       setMessageModal(prev => ({ ...prev, message: '' }));
+
+      // Actualizar el contador de mensajes leídos para incluir el mensaje enviado
+      // Esto evita que el propio mensaje aparezca como "no leído"
+      markMessagesAsRead(messageModal.dateStr, updatedMessages.length);
     } catch (e) {
       console.error("Error al guardar mensaje", e);
+      showNotification('Error al enviar mensaje');
+    }
+  };
+
+  // Función para guardar mensaje en el chat general del grupo
+  const saveGeneralMessage = async () => {
+    if (!user || !groupId || !groupData || !generalChatModal.message.trim()) return;
+
+    const groupRef = doc(db, 'calendar_groups', groupId);
+
+    // Crear nuevo mensaje con timestamp
+    const newMessage = {
+      uid: user.uid,
+      name: user.displayName,
+      photoURL: user.photoURL || '',
+      text: generalChatModal.message.trim(),
+      timestamp: new Date().toISOString()
+    };
+
+    // Obtener mensajes existentes del chat general
+    const existingMessages = groupData.generalChat || [];
+    const updatedMessages = [...existingMessages, newMessage];
+
+    try {
+      await updateDoc(groupRef, {
+        generalChat: updatedMessages
+      });
+      // Limpiar el campo de mensaje, mantener el modal abierto
+      setGeneralChatModal(prev => ({ ...prev, message: '' }));
+
+      // Actualizar el contador de mensajes leídos para incluir el mensaje enviado
+      // Esto evita que el propio mensaje aparezca como "no leído"
+      markGeneralChatAsRead(updatedMessages.length);
+    } catch (e) {
+      console.error("Error al guardar mensaje general", e);
       showNotification('Error al enviar mensaje');
     }
   };
@@ -1072,7 +1365,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
 
       {/* Header */}
-      <div className="bg-white shadow-sm sticky top-0 z-20">
+      <div className="bg-white shadow-sm sticky top-0 z-20 pt-[env(safe-area-inset-top)]">
         <div className="max-w-md mx-auto px-4 py-3 flex justify-between items-center">
           {/* Logo - clickeable para ir a página principal */}
           <button
@@ -1087,54 +1380,128 @@ export default function App() {
           </button>
 
           {user && (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1">
               {view === 'calendar' && (
                 <>
                   {/* Botón Home - volver a página principal */}
                   <button
                     onClick={() => { setGroupId(''); setGroupData(null); setView('join'); }}
-                    className="p-2 bg-slate-100 text-slate-600 rounded-full hover:bg-slate-200 transition"
+                    className="p-1.5 bg-slate-100 text-slate-600 rounded-full hover:bg-slate-200 transition"
                     title="Ir al inicio"
                   >
-                    <Home className="w-5 h-5" />
+                    <Home className="w-4 h-4" />
                   </button>
-                  <button onClick={openInviteModal} className="p-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 transition" title="Invitar por email">
-                    <Mail className="w-5 h-5" />
-                  </button>
-                  <button onClick={shareGroup} className="p-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition" title="Compartir grupo">
-                    <Share2 className="w-5 h-5" />
-                  </button>
-                  <button onClick={leaveGroup} className="p-2 bg-slate-100 text-slate-600 rounded-full hover:bg-slate-200 transition" title="Salir del grupo">
-                    <LogOut className="w-5 h-5" />
+                  {/* Botón salir del grupo */}
+                  <button
+                    onClick={leaveGroup}
+                    className="p-1.5 bg-red-50 text-red-500 rounded-full hover:bg-red-100 transition"
+                    title="Salir del grupo"
+                  >
+                    <LogOut className="w-4 h-4" />
                   </button>
                 </>
               )}
-              {/* Foto de perfil - clickeable para ir al inicio */}
-              {user.photoURL ? (
-                <img
-                  src={user.photoURL}
-                  alt={user.displayName}
-                  className="w-8 h-8 rounded-full border-2 border-indigo-200 cursor-pointer hover:border-indigo-400 transition"
-                  onClick={() => { setGroupId(''); setGroupData(null); setView('join'); }}
-                  title="Ir al inicio"
-                />
-              ) : (
+              {/* Foto de perfil - solo en vista principal */}
+              {view !== 'calendar' && (
+                user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName}
+                    className="w-8 h-8 rounded-full border-2 border-indigo-200 cursor-pointer hover:border-indigo-400 transition"
+                    onClick={() => { setGroupId(''); setGroupData(null); setView('join'); }}
+                    title="Ir al inicio"
+                  />
+                ) : (
+                  <button
+                    onClick={() => { setGroupId(''); setGroupData(null); setView('join'); }}
+                    className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-sm hover:bg-indigo-200 transition"
+                    title="Ir al inicio"
+                  >
+                    {user.displayName?.charAt(0) || '?'}
+                  </button>
+                )
+              )}
+              {/* Botón de instalar app (si no está instalada) - solo en vista principal */}
+              {!isStandalone && view !== 'calendar' && (
                 <button
-                  onClick={() => { setGroupId(''); setGroupData(null); setView('join'); }}
-                  className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-sm hover:bg-indigo-200 transition"
-                  title="Ir al inicio"
+                  onClick={() => {
+                    if (deferredPrompt) {
+                      handleInstallClick();
+                    } else if (isIOS()) {
+                      setShowIOSInstallModal(true);
+                    } else {
+                      setShowInstallPrompt(true);
+                    }
+                  }}
+                  className="p-2 rounded-full bg-indigo-100 text-indigo-600 hover:bg-indigo-200 transition"
+                  title="Instalar app"
                 >
-                  {user.displayName?.charAt(0) || '?'}
+                  <Download className="w-4 h-4" />
                 </button>
               )}
-              {/* Botón cerrar sesión */}
-              <button
-                onClick={handleLogout}
-                className="p-2 bg-red-50 text-red-600 rounded-full hover:bg-red-100 transition"
-                title="Cerrar sesión"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
+              {/* Botón de notificaciones - solo en vista principal */}
+              {view !== 'calendar' && (
+                messaging ? (
+                  <button
+                    onClick={notificationPermission === 'granted' ? disableNotifications : requestNotificationPermission}
+                    className={`p-2 rounded-full transition ${
+                      notificationPermission === 'granted'
+                        ? 'bg-green-50 text-green-600 hover:bg-green-100'
+                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    }`}
+                    title={notificationPermission === 'granted' ? 'Notificaciones activadas' : 'Activar notificaciones'}
+                  >
+                    {notificationPermission === 'granted' ? <BellRing className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+                  </button>
+                ) : isIOS() && isStandalone ? (
+                  /* En iOS PWA instalada, mostrar botón para activar notificaciones nativas */
+                  <button
+                    onClick={async () => {
+                      if ('Notification' in window) {
+                        const permission = await Notification.requestPermission();
+                        if (permission === 'granted') {
+                          showNotification('Notificaciones activadas');
+                          setNotificationPermission('granted');
+                        } else {
+                          showNotification('Habilita notificaciones en Ajustes > Agenda Grupal');
+                        }
+                      } else {
+                        showNotification('Actualiza iOS a la versión 16.4 o superior para notificaciones');
+                      }
+                    }}
+                    className={`p-2 rounded-full transition ${
+                      notificationPermission === 'granted'
+                        ? 'bg-green-50 text-green-600 hover:bg-green-100'
+                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    }`}
+                    title="Activar notificaciones"
+                  >
+                    {notificationPermission === 'granted' ? <BellRing className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+                  </button>
+                ) : isIOS() && !isStandalone ? (
+                  /* En iOS Safari, indicar que debe instalar primero */
+                  <button
+                    onClick={() => {
+                      showNotification('Instala la app primero para recibir notificaciones');
+                      setShowIOSInstallModal(true);
+                    }}
+                    className="p-2 rounded-full bg-amber-100 text-amber-600 hover:bg-amber-200 transition"
+                    title="Instala la app para notificaciones"
+                  >
+                    <BellOff className="w-4 h-4" />
+                  </button>
+                ) : null
+              )}
+              {/* Botón cerrar sesión - solo en vista principal */}
+              {view !== 'calendar' && (
+                <button
+                  onClick={handleLogout}
+                  className="p-2 bg-red-50 text-red-600 rounded-full hover:bg-red-100 transition"
+                  title="Cerrar sesión"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1144,6 +1511,131 @@ export default function App() {
       {notification && (
         <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm">
           {notification}
+        </div>
+      )}
+
+      {/* PWA Install Modal - Universal para todos los dispositivos */}
+      {(showInstallPrompt || showIOSInstallModal) && !isStandalone && (
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md p-6 pb-8 safe-area-bottom sm:m-4">
+            {/* Header con icono */}
+            <div className="flex justify-between items-start mb-4">
+              <div className="flex items-center gap-3">
+                <div className="bg-gradient-to-br from-indigo-500 to-blue-600 p-3 rounded-2xl">
+                  <Download className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">Instalar App</h3>
+                  <p className="text-xs text-slate-500">Acceso rápido desde tu pantalla</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowIOSInstallModal(false);
+                  dismissInstallPrompt();
+                }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Contenido según dispositivo */}
+            {deferredPrompt ? (
+              /* Android / Chrome Desktop - Instalación directa */
+              <div>
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4">
+                  <p className="text-green-800 text-sm font-medium flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5" />
+                    Tu dispositivo soporta instalación directa
+                  </p>
+                </div>
+                <p className="text-slate-600 text-sm mb-4">
+                  Al instalar, Agenda Grupal aparecerá como una app en tu dispositivo con acceso directo desde la pantalla de inicio.
+                </p>
+                <button
+                  onClick={handleInstallClick}
+                  className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2"
+                >
+                  <Download className="w-5 h-5" />
+                  Instalar ahora
+                </button>
+              </div>
+            ) : isIOS() ? (
+              /* iOS - Instrucciones manuales */
+              <div>
+                {/* Advertencia si no está en Safari */}
+                {!/Safari/i.test(navigator.userAgent) || /CriOS|FxiOS|OPiOS/i.test(navigator.userAgent) ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+                    <p className="text-amber-800 text-sm font-medium">Abre en Safari</p>
+                    <p className="text-amber-600 text-xs mt-1">Solo Safari permite instalar apps en iPhone/iPad. Copia este enlace y ábrelo en Safari.</p>
+                  </div>
+                ) : null}
+
+                <p className="text-slate-600 text-sm mb-4">Sigue estos pasos para instalar:</p>
+
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3 bg-slate-50 p-3 rounded-xl">
+                    <div className="bg-blue-500 text-white w-7 h-7 rounded-full flex items-center justify-center font-bold text-sm shrink-0">1</div>
+                    <div>
+                      <p className="text-slate-700 text-sm font-medium">Toca el menú <span className="inline-block bg-slate-200 px-2 py-0.5 rounded font-bold">•••</span></p>
+                      <p className="text-slate-500 text-xs">En la esquina inferior derecha de Safari</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3 bg-slate-50 p-3 rounded-xl">
+                    <div className="bg-blue-500 text-white w-7 h-7 rounded-full flex items-center justify-center font-bold text-sm shrink-0">2</div>
+                    <div>
+                      <p className="text-slate-700 text-sm font-medium">Toca "Compartir" <span className="inline-block bg-slate-200 px-1.5 py-0.5 rounded text-base">⬆️</span></p>
+                      <p className="text-slate-500 text-xs">Se abrirá el menú de compartir</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3 bg-slate-50 p-3 rounded-xl">
+                    <div className="bg-blue-500 text-white w-7 h-7 rounded-full flex items-center justify-center font-bold text-sm shrink-0">3</div>
+                    <div>
+                      <p className="text-slate-700 text-sm font-medium">Añadir a pantalla de inicio</p>
+                      <p className="text-slate-500 text-xs">Desplázate hacia abajo y busca esta opción</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3 bg-slate-50 p-3 rounded-xl">
+                    <div className="bg-blue-500 text-white w-7 h-7 rounded-full flex items-center justify-center font-bold text-sm shrink-0">4</div>
+                    <div>
+                      <p className="text-slate-700 text-sm font-medium">Confirma "Añadir"</p>
+                      <p className="text-slate-500 text-xs">En la esquina superior derecha</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 p-3 bg-indigo-50 rounded-xl">
+                  <p className="text-xs text-indigo-700">
+                    <strong>Notificaciones:</strong> Una vez instalada podrás activar notificaciones (iOS 16.4+)
+                  </p>
+                </div>
+              </div>
+            ) : (
+              /* Otros navegadores desktop sin soporte */
+              <div>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
+                  <p className="text-slate-700 text-sm font-medium">Instrucciones para tu navegador:</p>
+                </div>
+
+                <div className="space-y-3 text-sm text-slate-600">
+                  <p><strong>Chrome:</strong> Haz clic en el icono de instalar en la barra de direcciones (⊕) o en el menú ⋮ → "Instalar Agenda Grupal"</p>
+                  <p><strong>Edge:</strong> Haz clic en el icono de apps en la barra de direcciones o en el menú → "Instalar este sitio como aplicación"</p>
+                  <p><strong>Firefox:</strong> Firefox no soporta instalación de PWAs. Usa Chrome o Edge.</p>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={() => {
+                setShowIOSInstallModal(false);
+                dismissInstallPrompt();
+              }}
+              className="w-full mt-4 bg-slate-100 text-slate-700 py-3 rounded-xl font-medium"
+            >
+              {deferredPrompt ? 'Ahora no' : 'Entendido'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -1259,12 +1751,12 @@ export default function App() {
             </div>
 
             {/* Input Area - iOS style */}
-            <div className="bg-slate-200/80 backdrop-blur-lg px-3 py-2 border-t border-slate-300 sm:rounded-b-2xl">
-              <div className="flex items-end gap-2">
-                <div className="flex-1 bg-white rounded-full border border-slate-300 flex items-center">
+            <div className="bg-slate-200/80 backdrop-blur-lg px-3 py-2 border-t border-slate-300 sm:rounded-b-2xl safe-area-bottom">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-white rounded-full border border-slate-300 flex items-center min-h-[44px]">
                   <input
                     type="text"
-                    className="flex-1 px-4 py-2 bg-transparent outline-none text-sm"
+                    className="flex-1 px-4 py-2.5 bg-transparent outline-none text-base"
                     placeholder="Mensaje..."
                     value={messageModal.message}
                     onChange={(e) => setMessageModal({ ...messageModal, message: e.target.value })}
@@ -1274,25 +1766,171 @@ export default function App() {
                         saveMessage();
                       }
                     }}
+                    autoComplete="off"
+                    autoCorrect="off"
                   />
                 </div>
                 <button
                   onClick={saveMessage}
                   disabled={!messageModal.message.trim()}
                   className={`
-                    w-9 h-9 rounded-full flex items-center justify-center transition
+                    w-11 h-11 rounded-full flex items-center justify-center transition flex-shrink-0
                     ${messageModal.message.trim()
-                      ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                      ? 'bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800'
                       : 'bg-slate-300 text-slate-400 cursor-not-allowed'
                     }
                   `}
                 >
-                  <Send className="w-4 h-4" />
+                  <Send className="w-5 h-5" />
                 </button>
               </div>
-              <p className="text-[10px] text-slate-400 text-center mt-1">
-                Presiona Enter para enviar
-              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* General Chat Modal - iMessage Style */}
+      {generalChatModal.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
+          <div className="bg-slate-100 w-full sm:max-w-md sm:rounded-2xl sm:m-4 flex flex-col max-h-[85vh] sm:max-h-[600px]">
+            {/* Header - iOS style */}
+            <div className="bg-indigo-600 px-4 py-3 flex items-center justify-between sm:rounded-t-2xl">
+              <button
+                onClick={() => setGeneralChatModal({ open: false, message: '' })}
+                className="text-indigo-200 font-medium text-sm hover:text-white"
+              >
+                Cerrar
+              </button>
+              <div className="text-center">
+                <h3 className="font-semibold text-white">Chat del grupo</h3>
+                <p className="text-xs text-indigo-200">
+                  {groupData?.name || 'Chat general'}
+                </p>
+              </div>
+              <div className="w-12"></div>
+            </div>
+
+            {/* Messages Area - Chat bubbles */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-100">
+              {(() => {
+                const allMessages = groupData?.generalChat || [];
+
+                if (allMessages.length === 0) {
+                  return (
+                    <div className="flex flex-col items-center justify-center h-full text-slate-400 py-8">
+                      <MessageCircle className="w-12 h-12 mb-2 opacity-50" />
+                      <p className="text-sm">No hay mensajes aún</p>
+                      <p className="text-xs">Inicia la conversación del grupo</p>
+                    </div>
+                  );
+                }
+
+                // Ordenar por timestamp
+                const sortedMessages = [...allMessages].sort((a, b) =>
+                  new Date(a.timestamp) - new Date(b.timestamp)
+                );
+
+                return sortedMessages.map((msg, idx) => {
+                  const isMe = msg.uid === user?.uid;
+                  const time = new Date(msg.timestamp);
+                  const timeStr = time.getFullYear() > 1970
+                    ? time.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+                    : '';
+                  const dateStr = time.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+
+                  // Mostrar separador de fecha si es un día diferente
+                  const prevMsg = sortedMessages[idx - 1];
+                  const prevDate = prevMsg ? new Date(prevMsg.timestamp).toDateString() : null;
+                  const showDateSeparator = !prevMsg || prevDate !== time.toDateString();
+
+                  return (
+                    <div key={`${msg.uid}-${idx}`}>
+                      {showDateSeparator && (
+                        <div className="flex justify-center my-2">
+                          <span className="text-[10px] text-slate-400 bg-slate-200 px-2 py-0.5 rounded-full">
+                            {dateStr}
+                          </span>
+                        </div>
+                      )}
+                      <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`flex items-end gap-2 max-w-[80%] ${isMe ? 'flex-row-reverse' : ''}`}>
+                          {/* Avatar */}
+                          {!isMe && (
+                            <div className="flex-shrink-0 mb-1">
+                              {msg.photoURL ? (
+                                <img src={msg.photoURL} alt={msg.name} className="w-7 h-7 rounded-full" />
+                              ) : (
+                                <div className="w-7 h-7 rounded-full bg-slate-400 flex items-center justify-center text-white text-xs font-medium">
+                                  {msg.name?.charAt(0) || '?'}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Message bubble */}
+                          <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                            {!isMe && (
+                              <span className="text-[10px] text-slate-500 ml-1 mb-0.5">
+                                {msg.name?.split(' ')[0] || 'Usuario'}
+                              </span>
+                            )}
+                            <div
+                              className={`
+                                px-4 py-2 rounded-2xl text-sm leading-relaxed
+                                ${isMe
+                                  ? 'bg-indigo-600 text-white rounded-br-md'
+                                  : 'bg-white text-slate-800 rounded-bl-md shadow-sm'
+                                }
+                              `}
+                            >
+                              {msg.text}
+                            </div>
+                            <span className="text-[10px] text-slate-400 mx-1 mt-0.5">
+                              {isMe ? 'Tú' : ''} {timeStr && `· ${timeStr}`}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Input Area - iOS style */}
+            <div className="bg-slate-200/80 backdrop-blur-lg px-3 py-2 border-t border-slate-300 sm:rounded-b-2xl safe-area-bottom">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-white rounded-full border border-slate-300 flex items-center min-h-[44px]">
+                  <input
+                    type="text"
+                    className="flex-1 px-4 py-2.5 bg-transparent outline-none text-base"
+                    placeholder="Escribe un mensaje..."
+                    value={generalChatModal.message}
+                    onChange={(e) => setGeneralChatModal({ ...generalChatModal, message: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        saveGeneralMessage();
+                      }
+                    }}
+                    autoComplete="off"
+                    autoCorrect="off"
+                  />
+                </div>
+                <button
+                  onClick={saveGeneralMessage}
+                  disabled={!generalChatModal.message.trim()}
+                  className={`
+                    w-11 h-11 rounded-full flex items-center justify-center transition flex-shrink-0
+                    ${generalChatModal.message.trim()
+                      ? 'bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800'
+                      : 'bg-slate-300 text-slate-400 cursor-not-allowed'
+                    }
+                  `}
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1662,22 +2300,97 @@ export default function App() {
 
         {/* VIEW: LOGIN */}
         {view === 'login' && (
-          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 text-center">
-            <Calendar className="w-16 h-16 text-indigo-600 mx-auto mb-2" />
-            <h1 className="text-2xl font-bold">AgendaGrupal</h1>
-            <p className="text-xs text-slate-400 uppercase tracking-widest mb-2">reconect</p>
-            <p className="text-slate-500 mb-8">Encuentra el día perfecto para reunirte con tus amigos</p>
+          <div className="space-y-4">
+            {/* Hero Section */}
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 text-center">
+              <div className="bg-gradient-to-br from-indigo-500 to-blue-600 w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
+                <Calendar className="w-10 h-10 text-white" />
+              </div>
+              <h1 className="text-2xl font-bold text-slate-800">AgendaGrupal</h1>
+              <p className="text-xs text-indigo-500 uppercase tracking-widest font-semibold mb-3">reconect</p>
+              <p className="text-slate-600 text-sm leading-relaxed">
+                La forma más fácil de encontrar el día perfecto para reunirte con tus amigos, familia o equipo de trabajo.
+              </p>
+            </div>
 
-            <button
-              onClick={handleGoogleLogin}
-              className="w-full py-4 bg-white border-2 border-slate-200 rounded-xl font-semibold flex items-center justify-center gap-3 hover:bg-slate-50 hover:border-slate-300 transition"
-            >
-              <Chrome className="w-5 h-5 text-blue-500" />
-              Iniciar con Google
-            </button>
+            {/* Features Section */}
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+              <h2 className="font-bold text-slate-800 mb-4 text-center">¿Qué puedes hacer?</h2>
+              <div className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="bg-green-100 p-2 rounded-xl shrink-0">
+                    <Users className="w-5 h-5 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-800 text-sm">Crea grupos</p>
+                    <p className="text-xs text-slate-500">Invita a amigos, familia o colegas con un simple código</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="bg-blue-100 p-2 rounded-xl shrink-0">
+                    <CheckCircle className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-800 text-sm">Marca tu disponibilidad</p>
+                    <p className="text-xs text-slate-500">Indica qué días puedes y cuáles no en un calendario visual</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="bg-amber-100 p-2 rounded-xl shrink-0">
+                    <Star className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-800 text-sm">Encuentra el día ideal</p>
+                    <p className="text-xs text-slate-500">Visualiza cuándo todos pueden reunirse con colores intuitivos</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="bg-purple-100 p-2 rounded-xl shrink-0">
+                    <MessageCircle className="w-5 h-5 text-purple-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-800 text-sm">Chat integrado</p>
+                    <p className="text-xs text-slate-500">Conversa con tu grupo y recibe notificaciones de nuevos mensajes</p>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-            <p className="text-xs text-slate-400 mt-6">
-              Al iniciar sesión, podrás crear grupos y coordinar fechas con tus amigos
+            {/* Tips Section */}
+            <div className="bg-gradient-to-br from-indigo-50 to-blue-50 p-5 rounded-2xl border border-indigo-100">
+              <h2 className="font-bold text-indigo-800 mb-3 text-sm flex items-center gap-2">
+                <Smartphone className="w-4 h-4" />
+                Mejor experiencia en tu celular
+              </h2>
+              <div className="space-y-2 text-xs text-indigo-700">
+                <p className="flex items-start gap-2">
+                  <Download className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span><strong>Instala la app</strong> en tu pantalla de inicio para acceso rápido como cualquier aplicación</span>
+                </p>
+                <p className="flex items-start gap-2">
+                  <Bell className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span><strong>Activa notificaciones</strong> para enterarte cuando alguien escriba en el chat del grupo</span>
+                </p>
+              </div>
+            </div>
+
+            {/* Login Button */}
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+              <button
+                onClick={handleGoogleLogin}
+                className="w-full py-4 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl font-semibold flex items-center justify-center gap-3 hover:from-indigo-700 hover:to-blue-700 transition shadow-lg shadow-indigo-200"
+              >
+                <Chrome className="w-5 h-5" />
+                Comenzar con Google
+              </button>
+              <p className="text-xs text-slate-400 mt-3 text-center">
+                Usamos tu cuenta de Google para identificarte de forma segura
+              </p>
+            </div>
+
+            {/* Footer */}
+            <p className="text-center text-xs text-slate-400 pb-4">
+              Gratis y sin anuncios
             </p>
           </div>
         )}
@@ -1846,34 +2559,51 @@ export default function App() {
                           );
                         }
 
-                        return filteredGroups.map((group) => (
-                          <div key={group.id} className="flex items-center gap-3 p-3 hover:bg-slate-50 transition">
-                            <button
-                              onClick={() => { setGroupId(group.id); setView('calendar'); }}
-                              className="flex-1 flex items-center gap-3 text-left min-w-0"
-                            >
-                              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center flex-shrink-0">
-                                <span className="text-white font-bold text-sm">{(group.name || group.id).charAt(0).toUpperCase()}</span>
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <h4 className="font-medium text-slate-800 truncate text-sm">{group.name || `Grupo ${group.id}`}</h4>
-                                <div className="flex items-center gap-2 text-xs text-slate-400">
-                                  <span className="font-mono">{group.id}</span>
-                                  <span>•</span>
-                                  <span>{group.memberCount} miembro{group.memberCount !== 1 ? 's' : ''}</span>
+                        return filteredGroups.map((group) => {
+                          const unreadCount = getTotalUnreadForGroup(group);
+                          return (
+                            <div key={group.id} className="flex items-center gap-3 p-3 hover:bg-slate-50 transition">
+                              <button
+                                onClick={() => { setGroupId(group.id); setView('calendar'); }}
+                                className="flex-1 flex items-center gap-3 text-left min-w-0"
+                              >
+                                <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center flex-shrink-0">
+                                  <span className="text-white font-bold text-sm">{(group.name || group.id).charAt(0).toUpperCase()}</span>
+                                  {unreadCount > 0 && (
+                                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center font-bold">
+                                      {unreadCount > 99 ? '99+' : unreadCount}
+                                    </span>
+                                  )}
                                 </div>
-                              </div>
-                              <ChevronRight className="w-4 h-4 text-slate-300" />
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setDeleteGroupModal({ open: true, groupId: group.id, groupName: group.name || `Grupo ${group.id}` }); }}
-                              className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                              title="Salir del grupo"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ));
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-medium text-slate-800 truncate text-sm">{group.name || `Grupo ${group.id}`}</h4>
+                                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                                    <span className="font-mono">{group.id}</span>
+                                    <span>•</span>
+                                    <span>{group.memberCount} miembro{group.memberCount !== 1 ? 's' : ''}</span>
+                                    {unreadCount > 0 && (
+                                      <>
+                                        <span>•</span>
+                                        <span className="text-red-500 font-medium flex items-center gap-1">
+                                          <MessageCircle className="w-3 h-3" />
+                                          {unreadCount} nuevo{unreadCount !== 1 ? 's' : ''}
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                                <ChevronRight className="w-4 h-4 text-slate-300" />
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setDeleteGroupModal({ open: true, groupId: group.id, groupName: group.name || `Grupo ${group.id}` }); }}
+                                className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                                title="Salir del grupo"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          );
+                        });
                       })()
                     )}
                   </div>
@@ -1901,11 +2631,64 @@ export default function App() {
 
               {sectionExpanded.calendar && (
                 <div className="border-t border-slate-100 p-4">
-                  <p className="text-xs text-slate-500 mb-3">
-                    Toca un día para marcarlo como no disponible. Se actualizará en todos tus grupos.
-                  </p>
+                  {/* Instrucciones del calendario personal */}
+                  <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 mb-4">
+                    <h4 className="text-xs font-semibold text-amber-800 mb-2">¿Para qué sirve?</h4>
+                    <ul className="text-[11px] text-amber-700 space-y-1">
+                      <li className="flex items-start gap-2">
+                        <Ban className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                        <span><strong>Bloquea días</strong> que no estás disponible (vacaciones, compromisos, etc.)</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <CheckCheck className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                        <span><strong>Días verdes</strong> = tienes un plan confirmado en algún grupo</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <Users className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                        <span>Los cambios se reflejan <strong>automáticamente</strong> en todos tus grupos</span>
+                      </li>
+                    </ul>
+                    <p className="text-[10px] text-amber-600 mt-2 italic">
+                      Toca cualquier día disponible para bloquearlo
+                    </p>
+                  </div>
 
-              {/* Mini calendario de 30 días */}
+              {/* Navegación de meses */}
+              <div className="flex items-center justify-between mb-3">
+                <button
+                  onClick={() => {
+                    setPersonalCalendarMonth(prev => {
+                      const newMonth = prev.month - 1;
+                      if (newMonth < 0) {
+                        return { year: prev.year - 1, month: 11 };
+                      }
+                      return { ...prev, month: newMonth };
+                    });
+                  }}
+                  className="p-1.5 bg-slate-100 rounded-lg hover:bg-slate-200 transition"
+                >
+                  <ChevronLeft className="w-4 h-4 text-slate-600" />
+                </button>
+                <span className="text-sm font-semibold text-slate-700 capitalize">
+                  {new Date(personalCalendarMonth.year, personalCalendarMonth.month).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
+                </span>
+                <button
+                  onClick={() => {
+                    setPersonalCalendarMonth(prev => {
+                      const newMonth = prev.month + 1;
+                      if (newMonth > 11) {
+                        return { year: prev.year + 1, month: 0 };
+                      }
+                      return { ...prev, month: newMonth };
+                    });
+                  }}
+                  className="p-1.5 bg-slate-100 rounded-lg hover:bg-slate-200 transition"
+                >
+                  <ChevronRight className="w-4 h-4 text-slate-600" />
+                </button>
+              </div>
+
+              {/* Mini calendario del mes */}
               <div className="grid grid-cols-7 gap-1 mb-3">
                 {/* Headers de días */}
                 {['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((d, i) => (
@@ -1918,28 +2701,43 @@ export default function App() {
                   const today = new Date();
                   today.setHours(0, 0, 0, 0);
 
-                  // Encontrar el lunes de esta semana
-                  const startOfWeek = new Date(today);
-                  const dayOfWeek = today.getDay();
-                  const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-                  startOfWeek.setDate(today.getDate() + diff);
+                  // Primer día del mes seleccionado
+                  const firstDayOfMonth = new Date(personalCalendarMonth.year, personalCalendarMonth.month, 1);
+                  // Último día del mes
+                  const lastDayOfMonth = new Date(personalCalendarMonth.year, personalCalendarMonth.month + 1, 0);
 
-                  // Generar 35 días (5 semanas)
-                  for (let i = 0; i < 35; i++) {
-                    const date = new Date(startOfWeek);
-                    date.setDate(startOfWeek.getDate() + i);
+                  // Encontrar el lunes de la primera semana del mes
+                  const startOfCalendar = new Date(firstDayOfMonth);
+                  const dayOfWeek = firstDayOfMonth.getDay();
+                  const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+                  startOfCalendar.setDate(firstDayOfMonth.getDate() + diff);
+
+                  // Generar 42 días (6 semanas) para cubrir cualquier mes
+                  for (let i = 0; i < 42; i++) {
+                    const date = new Date(startOfCalendar);
+                    date.setDate(startOfCalendar.getDate() + i);
                     const dateStr = date.toISOString().split('T')[0];
 
                     const isBlocked = userData?.blockedDays?.[dateStr];
                     const confirmedPlan = userData?.confirmedPlans?.[dateStr];
                     const isPast = date < today;
                     const isToday = date.getTime() === today.getTime();
+                    const isCurrentMonth = date.getMonth() === personalCalendarMonth.month && date.getFullYear() === personalCalendarMonth.year;
+
+                    // Si ya pasamos el último día del mes y estamos en una nueva semana, no mostrar más filas
+                    if (i >= 35 && date > lastDayOfMonth && date.getDay() === 1) {
+                      break;
+                    }
 
                     let bgColor = 'bg-slate-50 hover:bg-slate-100';
                     let textColor = 'text-slate-600';
                     let icon = null;
 
-                    if (isPast) {
+                    // Días fuera del mes actual
+                    if (!isCurrentMonth) {
+                      bgColor = 'bg-transparent';
+                      textColor = 'text-slate-300';
+                    } else if (isPast) {
                       bgColor = 'bg-slate-100';
                       textColor = 'text-slate-300';
                     } else if (isBlocked) {
@@ -1952,29 +2750,30 @@ export default function App() {
                       icon = <CheckCheck className="w-2.5 h-2.5" />;
                     }
 
-                    if (isToday) {
+                    if (isToday && isCurrentMonth) {
                       bgColor = isBlocked ? 'bg-red-200' : confirmedPlan ? 'bg-green-200' : 'bg-indigo-100';
                     }
 
                     days.push(
                       <button
                         key={dateStr}
-                        onClick={() => !isPast && openBlockDayModal(dateStr)}
-                        disabled={isPast}
+                        onClick={() => isCurrentMonth && !isPast && openBlockDayModal(dateStr)}
+                        disabled={!isCurrentMonth || isPast}
                         className={`
                           relative aspect-square rounded-lg flex flex-col items-center justify-center text-xs font-medium transition
                           ${bgColor} ${textColor}
-                          ${isPast ? 'cursor-not-allowed' : 'cursor-pointer'}
-                          ${isToday ? 'ring-2 ring-indigo-400' : ''}
+                          ${!isCurrentMonth || isPast ? 'cursor-not-allowed' : 'cursor-pointer'}
+                          ${isToday && isCurrentMonth ? 'ring-2 ring-indigo-400' : ''}
                         `}
                         title={
+                          !isCurrentMonth ? '' :
                           isBlocked ? `Bloqueado: ${userData?.blockedDays?.[dateStr]?.reason || 'Sin razón'}` :
                           confirmedPlan ? `Plan: ${confirmedPlan.groupName}` :
                           'Clic para bloquear'
                         }
                       >
                         <span className="text-[11px] font-bold">{date.getDate()}</span>
-                        {icon && <span className="absolute bottom-0.5">{icon}</span>}
+                        {icon && isCurrentMonth && <span className="absolute bottom-0.5">{icon}</span>}
                       </button>
                     );
                   }
@@ -2120,19 +2919,37 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Botones de compartir */}
+              {/* Botones de compartir y chat */}
               <div className="flex gap-2">
                 <button
                   onClick={copyFullInvite}
                   className="flex-1 py-2 bg-indigo-500/50 rounded-lg text-sm font-medium hover:bg-indigo-500/70 transition flex items-center justify-center gap-2"
                 >
-                  <Copy className="w-4 h-4" /> Copiar invitación
+                  <Copy className="w-4 h-4" /> Invitar
                 </button>
                 <button
                   onClick={shareGroup}
                   className="flex-1 py-2 bg-indigo-500/50 rounded-lg text-sm font-medium hover:bg-indigo-500/70 transition flex items-center justify-center gap-2"
                 >
                   <Share2 className="w-4 h-4" /> Compartir
+                </button>
+                <button
+                  onClick={() => {
+                    setGeneralChatModal({ open: true, message: '' });
+                    // Marcar mensajes del chat general como leídos
+                    const messageCount = groupData?.generalChat?.length || 0;
+                    if (messageCount > 0) {
+                      markGeneralChatAsRead(messageCount);
+                    }
+                  }}
+                  className="flex-1 py-2 bg-white/20 rounded-lg text-sm font-medium hover:bg-white/30 transition flex items-center justify-center gap-2 relative"
+                >
+                  <MessageCircle className="w-4 h-4" /> Chat
+                  {getUnreadGeneralChatCount() > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold">
+                      {getUnreadGeneralChatCount() > 9 ? '9+' : getUnreadGeneralChatCount()}
+                    </span>
+                  )}
                 </button>
               </div>
 
@@ -2163,6 +2980,125 @@ export default function App() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* Mis planes confirmados en este grupo */}
+            {(() => {
+              // Filtrar planes confirmados que pertenecen a este grupo
+              const myPlansInThisGroup = Object.entries(userData?.confirmedPlans || {})
+                .filter(([dateStr, plan]) => plan.groupId === groupId)
+                .map(([dateStr, plan]) => {
+                  const [year, month, day] = dateStr.split('-').map(Number);
+                  const date = new Date(year, month - 1, day);
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  return { dateStr, plan, date, isPast: date < today };
+                })
+                .filter(item => !item.isPast)
+                .sort((a, b) => a.date - b.date);
+
+              if (myPlansInThisGroup.length === 0) return null;
+
+              return (
+                <div className="mb-4 bg-green-50 border border-green-100 rounded-xl p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CheckCheck className="w-4 h-4 text-green-600" />
+                    <h4 className="text-sm font-semibold text-green-800">Mis planes confirmados</h4>
+                    <span className="bg-green-200 text-green-700 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                      {myPlansInThisGroup.length}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {myPlansInThisGroup.map(({ dateStr, date }) => (
+                      <div
+                        key={dateStr}
+                        className="flex items-center gap-1.5 bg-green-100 text-green-700 px-2.5 py-1 rounded-full text-xs font-medium"
+                      >
+                        <Calendar className="w-3 h-3" />
+                        {date.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Panel de Instrucciones Colapsable */}
+            <div className="mb-4">
+              <button
+                onClick={() => setShowGroupInstructions(!showGroupInstructions)}
+                className="w-full flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-blue-700 hover:bg-blue-100 transition"
+              >
+                <div className="flex items-center gap-2">
+                  <HelpCircle className="w-4 h-4" />
+                  <span className="text-sm font-medium">¿Cómo usar este calendario?</span>
+                </div>
+                {showGroupInstructions ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+
+              {showGroupInstructions && (
+                <div className="mt-2 bg-blue-50 border border-blue-100 rounded-lg p-4">
+                  <div className="space-y-3">
+                    {/* Paso 1: Marcar disponibilidad */}
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">1</div>
+                      <div>
+                        <p className="text-sm font-medium text-blue-800">Marca tus días disponibles</p>
+                        <p className="text-xs text-blue-600">Toca cualquier día para indicar que puedes ese día. El color cambiará según cuántos miembros estén disponibles.</p>
+                      </div>
+                    </div>
+
+                    {/* Paso 2: Colores */}
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">2</div>
+                      <div>
+                        <p className="text-sm font-medium text-blue-800">Identifica los mejores días</p>
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          <span className="inline-flex items-center gap-1 text-[11px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                            <span className="w-2 h-2 rounded-full bg-green-500"></span> 100% disponible
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-[11px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">
+                            <span className="w-2 h-2 rounded-full bg-yellow-400"></span> ≥50% disponible
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-[11px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                            <span className="w-2 h-2 rounded-full bg-red-400"></span> &lt;50% disponible
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Paso 3: Botones */}
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">3</div>
+                      <div>
+                        <p className="text-sm font-medium text-blue-800">Usa las herramientas de cada día</p>
+                        <div className="grid grid-cols-2 gap-2 mt-1">
+                          <div className="flex items-center gap-1.5 text-[11px] text-blue-700">
+                            <Star className="w-3 h-3 text-yellow-500" /> Marcar favorito
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[11px] text-blue-700">
+                            <MessageCircle className="w-3 h-3 text-indigo-500" /> Agregar nota
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[11px] text-blue-700">
+                            <Ban className="w-3 h-3 text-red-500" /> Bloquear día
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[11px] text-blue-700">
+                            <CheckCheck className="w-3 h-3 text-green-500" /> Confirmar plan
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Nota adicional */}
+                    <div className="pt-2 border-t border-blue-200">
+                      <p className="text-[11px] text-blue-600 flex items-start gap-1.5">
+                        <Info className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                        <span><strong>Tip:</strong> Cuando todos estén disponibles (verde), usa "Confirmar plan" para bloquear ese día automáticamente en tus otros grupos.</span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* View Mode Selector */}
