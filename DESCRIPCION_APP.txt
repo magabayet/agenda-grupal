@@ -1,0 +1,202 @@
+================================================================================
+                           AGENDA GRUPAL
+           Aplicacion para Coordinacion de Fechas en Grupo
+================================================================================
+
+URL: https://planificador-grupal.web.app
+
+================================================================================
+                        DESCRIPCION GENERAL
+================================================================================
+
+AgendaGrupal es una Progressive Web App (PWA) disenada para facilitar la
+coordinacion de fechas y disponibilidad entre grupos de personas. Permite a
+los usuarios crear o unirse a grupos, marcar su disponibilidad en un
+calendario compartido, comunicarse mediante chat y visualizar la
+disponibilidad grupal usando un sistema de semaforo (verde, amarillo, rojo).
+
+================================================================================
+                      FUNCIONALIDADES PRINCIPALES
+================================================================================
+
+1. GESTION DE GRUPOS
+   - Crear nuevos grupos con nombre y descripcion
+   - Unirse a grupos existentes mediante codigo de 6 caracteres alfanumericos
+   - Invitar miembros por email (abre Gmail con mensaje pre-escrito)
+   - Editar informacion del grupo (nombre, descripcion)
+   - Ver lista de miembros del grupo
+
+2. CALENDARIO COMPARTIDO
+   - Marcar disponibilidad en fechas especificas
+   - Sistema de semaforo para visualizar disponibilidad grupal:
+     * Verde: 100% de los miembros disponibles
+     * Amarillo: 50% o mas de los miembros disponibles
+     * Rojo: Menos del 50% de los miembros disponibles
+   - Tres modos de visualizacion: lista, cuadricula y calendario mensual
+   - Marcar fechas como favoritas (estrellas)
+   - Filtrar por: todas, disponibles, favoritas, verdes, amarillas, rojas
+
+3. GESTION DE DIAS PERSONALES
+   - Bloquear dias personales (no disponible para ningun grupo)
+   - Confirmar planes (compromiso con un grupo especifico)
+   - Deteccion de conflictos entre grupos
+   - Sincronizacion automatica: bloquear un dia remueve disponibilidad
+     en todos los grupos
+
+4. SISTEMA DE CHAT
+   - Chat general del grupo
+   - Chat por dia especifico
+   - Contador de mensajes sin leer (badges)
+   - Notificaciones push para nuevos mensajes
+
+5. NOTIFICACIONES PUSH
+   - Notificaciones en tiempo real para nuevos mensajes
+   - Configurable por usuario (activar/desactivar)
+   - Funciona en background mediante Service Worker
+
+6. PWA (Progressive Web App)
+   - Instalable en dispositivos moviles y escritorio
+   - Funciona offline (Service Worker)
+   - Experiencia nativa en iOS y Android
+   - Soporte especial para iOS (instrucciones de instalacion)
+
+================================================================================
+                      CARACTERISTICAS TECNICAS
+================================================================================
+
+FRONTEND
+--------
+- Framework: React 19.2
+- Bundler: Vite 7.2
+- Estilos: Tailwind CSS 4.1
+- Iconos: lucide-react 0.555
+- Arquitectura: Single-file (src/App.jsx ~3700 lineas)
+- Estado: useState/useEffect de React (sin Redux ni Context externo)
+- Navegacion: Estado interno (variable "view": login, join, calendar)
+
+BACKEND (Firebase)
+------------------
+- Autenticacion: Firebase Auth (Google Sign-In)
+- Base de datos: Cloud Firestore (tiempo real con onSnapshot)
+- Hosting: Firebase Hosting
+- Cloud Functions: Node.js (trigger onDocumentUpdated)
+- Cloud Messaging: FCM para notificaciones push
+
+MODELO DE DATOS (Firestore)
+---------------------------
+
+Coleccion: users/{uid}
+{
+  displayName: string,
+  email: string,
+  photoURL: string,
+  groups: ["ABC123", ...],           // IDs de grupos
+  blockedDays: {
+    "2025-01-15": { reason: string, blockedAt: timestamp }
+  },
+  confirmedPlans: {
+    "2025-01-15": { groupId, groupName, confirmedAt }
+  },
+  lastSeenMessages: {
+    "groupId": { "_general": 5, "2025-01-15": 3 }
+  },
+  fcmTokens: ["token1", "token2"],
+  notificationsEnabled: boolean
+}
+
+Coleccion: calendar_groups/{groupId}
+{
+  name: string,
+  description: string,
+  members: [{ uid, name, photoURL }],
+  votes: {
+    "2025-01-15": ["uid1", "uid2", ...]  // UIDs disponibles
+  },
+  messages: {
+    "2025-01-15": [{ uid, name, text, timestamp }]
+  },
+  generalChat: [{ uid, name, text, timestamp }],
+  stars: {
+    "2025-01-15": ["uid1", "uid2"]       // UIDs que marcaron favorito
+  },
+  confirmedDays: {
+    "2025-01-15": [{ uid, name, photoURL, confirmedAt }]
+  }
+}
+
+CLOUD FUNCTIONS
+---------------
+- onGroupUpdate: Trigger de Firestore (v2)
+  * Se ejecuta al actualizar un grupo
+  * Detecta nuevos mensajes en chat general y chats de dias
+  * Envia notificaciones FCM a miembros (excepto remitente)
+  * Limpia tokens FCM invalidos automaticamente
+
+PWA / SERVICE WORKER
+--------------------
+- Manifest: public/manifest.json
+- Service Worker: public/firebase-messaging-sw.js
+- Iconos: Multiples tamanos (72x72 a 512x512)
+- Iconos maskable para Android
+- Orientacion: portrait-primary
+- Display: standalone
+
+VARIABLES DE ENTORNO
+--------------------
+VITE_FIREBASE_API_KEY
+VITE_FIREBASE_AUTH_DOMAIN
+VITE_FIREBASE_PROJECT_ID
+VITE_FIREBASE_STORAGE_BUCKET
+VITE_FIREBASE_MESSAGING_SENDER_ID
+VITE_FIREBASE_APP_ID
+VITE_FIREBASE_VAPID_KEY
+
+Nota: firebase-messaging-sw.js tiene config hardcodeada (los Service Workers
+no pueden acceder a variables de entorno de Vite).
+
+================================================================================
+                         COMANDOS DE DESARROLLO
+================================================================================
+
+# Desarrollo local
+npm run dev              # Servidor en localhost:5173
+npm run lint             # Ejecutar ESLint
+npm run preview          # Preview del build de produccion
+
+# Build y Deploy
+npm run build            # Genera /dist para produccion
+firebase deploy --only hosting    # Deploy del frontend
+firebase deploy --only functions  # Deploy de Cloud Functions
+
+# Cloud Functions (desde /functions)
+cd functions && npm run serve    # Emulador local
+cd functions && npm run deploy   # Deploy
+
+================================================================================
+                        COMPATIBILIDAD MOVIL
+================================================================================
+
+- iOS: Soporte para PWA con instrucciones de instalacion especiales
+       Notificaciones requieren iOS 16.4+
+- Android: Instalacion nativa via Chrome
+- Safe areas: Uso de env(safe-area-inset-top) para notch
+
+================================================================================
+                        DEPENDENCIAS PRINCIPALES
+================================================================================
+
+Produccion:
+- firebase: ^12.6.0
+- lucide-react: ^0.555.0
+- react: ^19.2.0
+- react-dom: ^19.2.0
+
+Desarrollo:
+- @tailwindcss/vite: ^4.1.17
+- @vitejs/plugin-react: ^5.1.1
+- eslint: ^9.39.1
+- tailwindcss: ^4.1.17
+- vite: ^7.2.4
+- sharp: ^0.34.5 (generacion de iconos PWA)
+
+================================================================================

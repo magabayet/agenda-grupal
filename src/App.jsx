@@ -177,7 +177,6 @@ export default function App() {
       setLoading(false);
       if (currentUser) {
         setView('join');
-        loadUserGroups(currentUser.uid);
       } else {
         setView('login');
         setUserGroups([]);
@@ -201,6 +200,105 @@ export default function App() {
     });
 
     return () => unsubscribe();
+  }, [user]);
+
+  // 1.6 Escuchar cambios en los grupos del usuario en tiempo real
+  const groupsMapRef = useRef(new Map());
+  const groupUnsubscribesRef = useRef([]);
+  const currentGroupIdsRef = useRef([]);
+
+  useEffect(() => {
+    if (!user) {
+      setUserGroups([]);
+      groupsMapRef.current.clear();
+      return;
+    }
+
+    const userRef = doc(db, 'users', user.uid);
+
+    // Listener principal para detectar cambios en la lista de grupos del usuario
+    const unsubscribeUser = onSnapshot(userRef, (userSnap) => {
+      if (!userSnap.exists()) {
+        setUserGroups([]);
+        groupsMapRef.current.clear();
+        return;
+      }
+
+      const userData = userSnap.data();
+      const newGroupIds = userData.groups || [];
+      const oldGroupIds = currentGroupIdsRef.current;
+
+      // Detectar grupos eliminados
+      const removedIds = oldGroupIds.filter(id => !newGroupIds.includes(id));
+      // Detectar grupos nuevos
+      const addedIds = newGroupIds.filter(id => !oldGroupIds.includes(id));
+
+      // Limpiar datos y listeners de grupos eliminados
+      removedIds.forEach(id => {
+        groupsMapRef.current.delete(id);
+      });
+
+      // Actualizar la referencia de IDs actuales
+      currentGroupIdsRef.current = newGroupIds;
+
+      if (newGroupIds.length === 0) {
+        // Limpiar todos los listeners de grupos
+        groupUnsubscribesRef.current.forEach(unsub => unsub());
+        groupUnsubscribesRef.current = [];
+        setUserGroups([]);
+        return;
+      }
+
+      // Solo crear listeners para grupos nuevos
+      addedIds.forEach((gId) => {
+        const groupRef = doc(db, 'calendar_groups', gId);
+        const unsubGroup = onSnapshot(groupRef, (groupSnap) => {
+          if (groupSnap.exists()) {
+            const data = groupSnap.data();
+            groupsMapRef.current.set(gId, {
+              id: gId,
+              name: data.name || '',
+              description: data.description || '',
+              memberCount: data.members?.length || 0,
+              members: data.members || [],
+              generalChat: data.generalChat || [],
+              messages: data.messages || {}
+            });
+          } else {
+            groupsMapRef.current.delete(gId);
+          }
+
+          // Actualizar el estado con todos los grupos actuales
+          // Mantener el orden original de groupIds
+          const orderedGroups = currentGroupIdsRef.current
+            .filter(id => groupsMapRef.current.has(id))
+            .map(id => groupsMapRef.current.get(id));
+          setUserGroups(orderedGroups);
+        }, (error) => {
+          console.error(`Error escuchando grupo ${gId}:`, error);
+        });
+
+        groupUnsubscribesRef.current.push(unsubGroup);
+      });
+
+      // Si no hay grupos nuevos pero sí hubo cambios (eliminaciones), actualizar el estado
+      if (addedIds.length === 0 && removedIds.length > 0) {
+        const orderedGroups = currentGroupIdsRef.current
+          .filter(id => groupsMapRef.current.has(id))
+          .map(id => groupsMapRef.current.get(id));
+        setUserGroups(orderedGroups);
+      }
+    }, (error) => {
+      console.error("Error escuchando usuario:", error);
+    });
+
+    return () => {
+      unsubscribeUser();
+      groupUnsubscribesRef.current.forEach(unsub => unsub());
+      groupUnsubscribesRef.current = [];
+      groupsMapRef.current.clear();
+      currentGroupIdsRef.current = [];
+    };
   }, [user]);
 
   // Inicializar notificaciones push
@@ -361,48 +459,6 @@ export default function App() {
     return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   };
 
-  // Cargar grupos del usuario
-  const loadUserGroups = async (uid) => {
-    try {
-      const userRef = doc(db, 'users', uid);
-      const userSnap = await getDoc(userRef);
-
-      if (userSnap.exists()) {
-        const userData = userSnap.data();
-        const groupIds = userData.groups || [];
-
-        // Cargar info de cada grupo
-        const groupsInfo = await Promise.all(
-          groupIds.map(async (gId) => {
-            try {
-              const groupRef = doc(db, 'calendar_groups', gId);
-              const groupSnap = await getDoc(groupRef);
-              if (groupSnap.exists()) {
-                const data = groupSnap.data();
-                return {
-                  id: gId,
-                  name: data.name || '',
-                  description: data.description || '',
-                  memberCount: data.members?.length || 0,
-                  members: data.members || [],
-                  generalChat: data.generalChat || [],
-                  messages: data.messages || {}
-                };
-              }
-              return null;
-            } catch {
-              return null;
-            }
-          })
-        );
-
-        setUserGroups(groupsInfo.filter(g => g !== null));
-      }
-    } catch (error) {
-      console.error("Error cargando grupos:", error);
-    }
-  };
-
   // 2. Escuchar cambios en el grupo
   useEffect(() => {
     if (!user || !groupId) return;
@@ -491,6 +547,8 @@ export default function App() {
       await updateDoc(userRef, {
         groups: arrayUnion(newGroupId)
       });
+
+      // El listener en tiempo real (useEffect 1.6) detectará el cambio y actualizará userGroups automáticamente
 
       // Enviar invitaciones por email si hay emails
       if (createGroupModal.emails.trim()) {
@@ -581,6 +639,8 @@ export default function App() {
           await updateDoc(userRef, {
             groups: arrayUnion(cleanId)
           });
+
+          // El listener en tiempo real (useEffect 1.6) detectará el cambio y actualizará userGroups automáticamente
         }
         setGroupId(cleanId);
         setView('calendar');

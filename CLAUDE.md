@@ -4,73 +4,88 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AgendaGrupal (reconect) is a group calendar coordination app where users can:
-- Sign in with Google
-- Create/join groups using shareable codes
-- Mark available dates and see group availability (traffic light system)
-- Leave notes on specific days and mark favorites with stars
-- Invite friends via email/Gmail
+AgendaGrupal is a PWA for coordinating dates between groups. Users can create/join groups, mark availability on a calendar, chat, and see group-wide availability using a traffic-light system.
 
-**Live URL:** https://planificador-grupal.web.app
+**Live:** https://planificador-grupal.web.app
 
 ## Commands
 
 ```bash
-npm run dev      # Start local dev server (Vite HMR)
-npm run build    # Build for production (outputs to dist/)
-npm run lint     # Run ESLint
-npm run preview  # Preview production build locally
+# Development
+npm run dev              # Start dev server at localhost:5173
+npm run lint             # Run ESLint
+npm run preview          # Preview production build locally
 
-# Deploy to Firebase Hosting
-firebase deploy --only hosting
+# Build & Deploy
+npm run build            # Build for production (outputs to /dist)
+firebase deploy --only hosting    # Deploy frontend
+firebase deploy --only functions  # Deploy Cloud Functions
+
+# Cloud Functions (from /functions directory)
+cd functions && npm run serve    # Local emulator
+cd functions && npm run deploy   # Deploy functions
 ```
 
 ## Architecture
 
-### Single-File React App
-The entire application lives in `src/App.jsx` (~1200 lines). It's a single-page app with no routing - view state is managed via a `view` state variable (`login`, `join`, `calendar`).
+### Single-File Frontend
+The entire frontend is in `src/App.jsx` (~3700 lines). View state managed via `view` variable: `login`, `join`, `calendar`.
 
 ### Tech Stack
-- **React 19** with Vite 7
-- **Tailwind CSS 4** (via @tailwindcss/vite plugin)
-- **Firebase**: Authentication (Google Sign-In), Firestore (realtime database), Hosting
-- **lucide-react**: Icons
+- **Frontend:** React 19, Vite 7, Tailwind CSS 4
+- **Backend:** Firebase (Auth, Firestore, Hosting, Functions, Cloud Messaging)
+- **Icons:** lucide-react
 
-### Firebase Data Model
+### Cloud Functions
+`functions/index.js` contains `onGroupUpdate` - Firestore trigger that sends FCM push notifications for new chat messages.
 
-**Firestore Collections:**
+## Data Model (Firestore)
 
-`users/{uid}`:
+**`users/{uid}`:**
 ```javascript
 {
   displayName, email, photoURL,
-  groups: ["ABC123", ...],  // Array of group IDs user belongs to
-  createdAt
+  groups: ["ABC123"],
+  blockedDays: { "2025-01-15": "reason" },
+  confirmedPlans: { "2025-01-15": { groupId, title } },
+  lastSeenMessages: { "groupId": { "_general": 5, "2025-01-15": 3 } },
+  fcmTokens: ["token"],
+  notificationsEnabled: true
 }
 ```
 
-`calendar_groups/{groupId}`:
+**`calendar_groups/{groupId}`:**
 ```javascript
 {
   name, description,
-  members: [{ uid, name, photoURL }, ...],
-  votes: { "2025-01-15": ["uid1", "uid2"], ... },      // Date availability
-  messages: { "2025-01-15": { "uid1": "note..." } },   // Per-user notes per date
-  stars: { "2025-01-15": ["uid1"], ... },              // Favorite dates
-  createdAt
+  members: [{ uid, name, photoURL }],
+  votes: { "2025-01-15": ["uid1", "uid2"] },
+  messages: { "2025-01-15": [{ uid, name, text, timestamp }] },
+  generalChat: [{ uid, name, text, timestamp }],
+  stars: { "2025-01-15": ["uid1"] }
 }
 ```
 
-### Key Patterns
+## Environment Variables
 
-- **Real-time sync**: Uses Firestore `onSnapshot` for live group data updates
-- **Atomic updates**: Uses `arrayUnion` for adding members/groups, dot notation for nested field updates (`votes.${dateStr}`)
-- **Traffic light colors**: 100% = green, >=50% = yellow, <50% = red
-- **Email invites**: Opens Gmail compose with pre-filled invitation via URL scheme
-- **Web Share API**: Native sharing on mobile, clipboard fallback on desktop
+Firebase config uses env variables. Copy `.env.example` to `.env`:
+```
+VITE_FIREBASE_API_KEY
+VITE_FIREBASE_AUTH_DOMAIN
+VITE_FIREBASE_PROJECT_ID
+VITE_FIREBASE_STORAGE_BUCKET
+VITE_FIREBASE_MESSAGING_SENDER_ID
+VITE_FIREBASE_APP_ID
+VITE_FIREBASE_VAPID_KEY
+```
 
-## Firebase Configuration
+Note: `public/firebase-messaging-sw.js` has hardcoded config (service workers can't access env vars).
 
-Firebase config is hardcoded in `src/App.jsx`. Project ID: `planificador-grupal`
+## Key Implementation Details
 
-To deploy, ensure Firebase CLI is logged in: `firebase login`
+- **Traffic light:** Green (100%), Yellow (≥50%), Red (<50%)
+- **Group codes:** 6-char alphanumeric, client-generated
+- **Real-time:** Firestore `onSnapshot` listeners
+- **iOS PWA:** Special install prompts, notifications require iOS 16.4+
+- **Safe areas:** Uses `env(safe-area-inset-top)` for notch compatibility
+- **Icon generation:** `node generate-icons.cjs` creates PWA icons from SVG
